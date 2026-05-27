@@ -266,30 +266,260 @@ function handleModels(env) {
 }
 
 /**
- * 联网搜索 - 多源搜索策略
- * 主搜索源：Bing 搜索（更可靠，Cloudflare Workers IP 不会被封）
- * 备用搜索源：DuckDuckGo Instant Answer API
+ * 联网搜索 - 多源搜索 + 内容抓取策略
  * 
- * 老版本模型适配：
- * - 搜索结果需要更简洁、更结构化的格式
- * - 限制摘要长度，避免 token 超限
- * - 优先返回高质量摘要
+ * 流程：
+ * 1. 用搜索引擎（Bing/DuckDuckGo）找到相关链接
+ * 2. 用爬虫抓取这些链接的实际网页内容
+ * 3. 提取正文、清洗 HTML、截取关键段落
+ * 4. 将真实内容喂给大模型
+ * 
+ * 这样大模型就能获取到网页的真实内容，而不是只有标题和摘要
  */
 async function webSearch(query, maxResults = 5) {
-  // 先尝试 Bing 搜索（在 Cloudflare Workers 中更可靠）
-  let results = await bingSearch(query, maxResults);
+  // 第一步：用搜索引擎找到相关链接
+  let searchResults = await bingSearch(query, maxResults);
   
-  // 如果 Bing 返回空结果，尝试 DuckDuckGo
-  if (!results.length) {
-    results = await duckduckgoSearch(query, maxResults);
+  if (!searchResults.length) {
+    searchResults = await duckduckgoSearch(query, maxResults);
   }
   
-  // 如果 DuckDuckGo 也返回空，尝试 DuckDuckGo Lite
-  if (!results.length) {
-    results = await fallbackSearch(query, maxResults);
+  if (!searchResults.length) {
+    searchResults = await fallbackSearch(query, maxResults);
+  }
+
+  // 第二步：用爬虫抓取搜索结果中网页的实际内容
+  if (searchResults.length > 0) {
+    searchResults = await enrichWithCrawler(searchResults, query);
   }
   
-  return results;
+  return searchResults;
+}
+
+/**
+ * 爬虫内容抓取器 - 抓取搜索结果中网页的实际内容
+ * 
+ * 策略：
+ * - 并行抓取多个网页（最多3个，避免超时）
+ * - 提取正文内容，去除 HTML 标签、脚本、样式
+ * - 智能截取与查询相关的段落
+ * - 每个网页最多提取 2000 字符
+ */
+async function enrichWithCrawler(searchResults, query) {
+  const urlsToFetch = searchResults
+    .filter(r => r.url && r.url.startsWith('http'))
+    .slice(0, 3); // 最多抓取3个网页
+
+  if (!urlsToFetch.length) return searchResults;
+
+  // 并行抓取所有网页
+  const fetchPromises = urlsToFetch.map(async (result) => {
+    try {
+      const content = await fetchPageContent(result.url);
+      if (content) {
+        // 提取与查询相关的段落
+        const relevantContent = extractRelevantContent(content, query, 2000);
+        if (relevantContent) {
+          result.fullContent = relevantContent;
+          result.hasCrawled = true;
+        }
+      }
+    } catch (err) {
+      console.error(`抓取 ${result.url} 失败:`, err.message);
+    }
+    return result;
+  });
+
+  // 设置超时（Cloudflare Workers 有 CPU 时间限制）
+  const timeout = new Promise((resolve) => {
+    setTimeout(() => resolve(null), 8000);
+  });
+
+  await Promise.race([
+    Promise.all(fetchPromises),
+    timeout,
+  ]);
+
+  return searchResults;
+}
+
+/**
+ * 抓取网页内容
+ * 返回清洗后的纯文本
+ */
+async function fetchPageContent(url) {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 单个网页5秒超时
+
+    const resp = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      },
+      redirect: 'follow',
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!resp.ok) return null;
+
+    // 只处理 HTML 内容，跳过图片、PDF 等
+    const contentType = resp.headers.get('content-type') || '';
+    if (!contentType.includes('text/html') && !contentType.includes('text/plain')) {
+      return null;
+    }
+
+    const html = await resp.text();
+    
+    // 清洗 HTML，提取纯文本
+    return cleanHTML(html);
+  } catch (err) {
+    console.error(`fetchPageContent 错误 (${url}):`, err.message);
+    return null;
+  }
+}
+
+/**
+ * HTML 清洗器 - 从 HTML 中提取纯文本正文
+ */
+function cleanHTML(html) {
+  if (!html) return '';
+  
+  let text = html;
+
+  // 1. 移除不需要的标签及其内容
+  const removeTags = [
+    'script', 'style', 'noscript', 'iframe', 'svg',
+    'nav', 'footer', 'header', 'aside',
+  ];
+  for (const tag of removeTags) {
+    text = text.replace(new RegExp(`<${tag}[^>]*>[\\s\\S]*?<\\/${tag}>`, 'gi'), '');
+    // 自闭合标签
+    text = text.replace(new RegExp(`<${tag}[^>]*\\/>`, 'gi'), '');
+  }
+
+  // 2. 移除 HTML 注释
+  text = text.replace(/<!--[\s\S]*?-->/g, '');
+
+  // 3. 将块级元素替换为换行符
+  text = text.replace(/<\/(div|p|h[1-6]|li|tr|article|section|blockquote|pre|table|ul|ol|dl)>/gi, '\n');
+  text = text.replace(/<(br|hr)[^>]*\/?>/gi, '\n');
+
+  // 4. 移除所有剩余的 HTML 标签
+  text = text.replace(/<[^>]*>/g, '');
+
+  // 5. 解码 HTML 实体
+  text = text.replace(/&amp;/g, '&')
+             .replace(/&lt;/g, '<')
+             .replace(/&gt;/g, '>')
+             .replace(/&quot;/g, '"')
+             .replace(/&#x27;/g, "'")
+             .replace(/&#x2F;/g, '/')
+             .replace(/&nbsp;/g, ' ')
+             .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n)));
+
+  // 6. 清理空白
+  text = text.replace(/\r\n/g, '\n')
+             .replace(/\r/g, '\n')
+             .replace(/\t/g, ' ')
+             .replace(/ +/g, ' ');
+
+  // 7. 合并多余空行（最多保留一个空行）
+  text = text.replace(/\n{3,}/g, '\n\n');
+
+  // 8. 去除首尾空白
+  text = text.trim();
+
+  return text;
+}
+
+/**
+ * 从网页内容中提取与查询相关的段落
+ * 
+ * 策略：
+ * - 将文本按段落分割
+ * - 计算每个段落与查询的相关性（关键词匹配）
+ * - 返回最相关的段落，总长度不超过 maxLength
+ */
+function extractRelevantContent(text, query, maxLength = 2000) {
+  if (!text) return '';
+
+  // 如果文本很短，直接返回
+  if (text.length <= maxLength) return text;
+
+  // 提取查询关键词
+  const keywords = extractKeywords(query);
+  
+  // 按段落分割
+  const paragraphs = text.split(/\n\n+/).filter(p => {
+    const trimmed = p.trim();
+    // 过滤太短的段落（可能是导航、广告等）
+    return trimmed.length > 20;
+  });
+
+  if (!paragraphs.length) {
+    // 没有合适的段落，返回开头部分
+    return text.substring(0, maxLength);
+  }
+
+  // 计算每个段落的相关性得分
+  const scored = paragraphs.map(p => {
+    const lowerP = p.toLowerCase();
+    let score = 0;
+    for (const kw of keywords) {
+      const count = (lowerP.match(new RegExp(kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+      score += count * 10;
+    }
+    // 段落长度适中加分（200-500字符最佳）
+    const len = p.length;
+    if (len > 100 && len < 800) score += 5;
+    return { text: p.trim(), score };
+  });
+
+  // 按得分排序
+  scored.sort((a, b) => b.score - a.score);
+
+  // 选取得分最高的段落，直到达到长度限制
+  let result = '';
+  for (const item of scored) {
+    if (result.length + item.text.length > maxLength) {
+      // 尝试截取部分
+      const remaining = maxLength - result.length;
+      if (remaining > 100) {
+        result += item.text.substring(0, remaining) + '...';
+      }
+      break;
+    }
+    result += item.text + '\n\n';
+  }
+
+  return result.trim() || text.substring(0, maxLength);
+}
+
+/**
+ * 从查询中提取关键词
+ */
+function extractKeywords(query) {
+  // 移除常见停用词和标点
+  const stopWords = ['的', '了', '是', '在', '我', '有', '和', '就', '不', '人', '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好', '自己', '这'];
+  
+  let cleaned = query
+    .replace(/[，。！？、；：""''（）【】《》\s,.!?;:'"()\[\]{}<>]/g, ' ')
+    .trim();
+  
+  const words = cleaned.split(/\s+/).filter(w => {
+    return w.length >= 2 && !stopWords.includes(w);
+  });
+
+  // 如果关键词太少，使用整个查询
+  if (words.length < 2) {
+    return [query];
+  }
+
+  return [...new Set(words)]; // 去重
 }
 
 /**
@@ -487,13 +717,13 @@ function getCurrentDate() {
 }
 
 /**
- * 构建搜索上下文 - 老版本模型适配版
+ * 构建搜索上下文 - 爬虫增强版
  * 
- * 适配策略：
- * 1. 使用更简洁的格式，减少 token 消耗
- * 2. 明确指示模型如何使用搜索结果
- * 3. 限制上下文长度，避免超出老版本模型的上下文窗口
- * 4. 如果搜索结果为空，返回空字符串（不注入无效上下文）
+ * 新策略：
+ * 1. 搜索结果包含搜索引擎摘要 + 爬虫抓取的完整网页内容
+ * 2. 优先展示爬虫抓取的真实内容（更详细、更准确）
+ * 3. 搜索引擎摘要作为补充
+ * 4. 智能截断，确保不超出模型上下文窗口
  */
 async function buildSearchContext(query) {
   const results = await webSearch(query, 5);
@@ -503,7 +733,6 @@ async function buildSearchContext(query) {
     return '';
   }
 
-  // 老版本模型适配：使用更简洁的格式，并强调当前日期
   let context = `当前日期：${getCurrentDate()}\n\n`;
   context += '以下是用户问题「' + query + '」的网络搜索结果，你必须参考这些信息来回答：\n\n';
   context += '=== 搜索结果 ===\n';
@@ -513,14 +742,22 @@ async function buildSearchContext(query) {
     if (r.url) {
       context += `来源: ${r.url}\n`;
     }
-    context += `内容: ${r.snippet}\n\n`;
+    
+    // 如果有爬虫抓取的完整内容，优先使用
+    if (r.hasCrawled && r.fullContent) {
+      context += `网页内容（爬虫抓取）:\n${r.fullContent}\n`;
+    } else if (r.snippet) {
+      // 否则使用搜索引擎摘要
+      context += `摘要: ${r.snippet}\n`;
+    }
+    context += '\n';
   });
   
   context += '=== 搜索结束 ===\n';
-  context += '重要：你必须基于以上搜索结果回答用户问题。在回答中引用搜索到的信息，并注明来源。如果搜索结果与问题不相关，请说明并基于你的知识回答。';
+  context += '重要：你必须基于以上搜索结果回答用户问题。如果搜索结果中包含"网页内容（爬虫抓取）"，请优先参考这些真实网页内容。在回答中引用搜索到的信息，并注明来源。如果搜索结果与问题不相关，请说明并基于你的知识回答。';
 
-  // 限制上下文总长度（老版本模型上下文窗口较小）
-  const MAX_CONTEXT_LENGTH = 3000;
+  // 限制上下文总长度
+  const MAX_CONTEXT_LENGTH = 6000; // 爬虫内容更丰富，适当增大限制
   if (context.length > MAX_CONTEXT_LENGTH) {
     context = context.substring(0, MAX_CONTEXT_LENGTH - 50) + '\n...(搜索结果已截断)\n=== 搜索结束 ===';
   }
