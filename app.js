@@ -42,10 +42,119 @@ function init() {
     loadConversations();
     loadModelInfo();
     bindEvents();
+    initMobileOptimizations();
     
     if (state.conversations.length > 0) {
         switchConversation(state.conversations[0].id);
     }
+}
+
+// ========== 移动端优化 ==========
+function initMobileOptimizations() {
+    // 检测是否为移动设备
+    const isMobile = /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent);
+    
+    if (isMobile) {
+        // 创建侧边栏遮罩层
+        const overlay = document.createElement('div');
+        overlay.className = 'sidebar-overlay';
+        overlay.id = 'sidebarOverlay';
+        document.body.appendChild(overlay);
+        
+        // 点击遮罩关闭侧边栏
+        overlay.addEventListener('click', () => {
+            if (!state.sidebarCollapsed) {
+                toggleSidebar();
+            }
+        });
+        
+        // 触摸滑动关闭侧边栏
+        let touchStartX = 0;
+        elements.sidebar.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX;
+        }, { passive: true });
+        
+        elements.sidebar.addEventListener('touchmove', (e) => {
+            const touchX = e.touches[0].clientX;
+            const diff = touchStartX - touchX;
+            if (diff > 50) {
+                if (!state.sidebarCollapsed) {
+                    toggleSidebar();
+                }
+            }
+        }, { passive: true });
+        
+        // iOS 键盘适配
+        if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+            setupIOSKeyboardHandler();
+        }
+        
+        // Android 键盘适配
+        if (/Android/.test(navigator.userAgent)) {
+            setupAndroidKeyboardHandler();
+        }
+    }
+}
+
+// iOS 键盘弹出/收起处理
+function setupIOSKeyboardHandler() {
+    const input = elements.messageInput;
+    let initialHeight = window.innerHeight;
+    let keyboardOpen = false;
+    
+    // 监听 visualViewport 变化（iOS Safari 支持）
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => {
+            const currentHeight = window.visualViewport.height;
+            const heightDiff = initialHeight - currentHeight;
+            
+            if (heightDiff > 150 && !keyboardOpen) {
+                // 键盘弹出
+                keyboardOpen = true;
+                scrollToBottom();
+                // 延迟滚动确保键盘动画完成
+                setTimeout(scrollToBottom, 300);
+            } else if (heightDiff < 50 && keyboardOpen) {
+                // 键盘收起
+                keyboardOpen = false;
+            }
+        });
+    }
+    
+    // 备用方案：监听 focus/blur
+    input.addEventListener('focus', () => {
+        if (!keyboardOpen) {
+            setTimeout(scrollToBottom, 300);
+        }
+    });
+    
+    // 修复 iOS Safari 双击缩放
+    input.addEventListener('touchstart', (e) => {
+        e.stopPropagation();
+    });
+}
+
+// Android 键盘适配
+function setupAndroidKeyboardHandler() {
+    const input = elements.messageInput;
+    let lastHeight = window.innerHeight;
+    
+    window.addEventListener('resize', () => {
+        const currentHeight = window.innerHeight;
+        const heightDiff = Math.abs(lastHeight - currentHeight);
+        
+        if (heightDiff > 100) {
+            // 键盘状态变化
+            scrollToBottom();
+            setTimeout(scrollToBottom, 200);
+        }
+        
+        lastHeight = currentHeight;
+    });
+    
+    input.addEventListener('focus', () => {
+        setTimeout(scrollToBottom, 300);
+    });
 }
 
 // 加载模型信息
@@ -838,6 +947,18 @@ function toggleSidebar() {
         elements.sidebar.classList.add('collapsed');
     } else {
         elements.sidebar.classList.remove('collapsed');
+    }
+    
+    // 移动端遮罩层处理
+    const overlay = document.getElementById('sidebarOverlay');
+    if (overlay) {
+        if (!state.sidebarCollapsed) {
+            overlay.classList.add('visible');
+            document.body.classList.add('sidebar-open');
+        } else {
+            overlay.classList.remove('visible');
+            document.body.classList.remove('sidebar-open');
+        }
     }
 }
 
