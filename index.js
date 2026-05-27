@@ -1,49 +1,40 @@
 /**
- * Cloudflare Pages Function - AI 问答系统后端 API
- * 放在 frontend/functions/ 目录下，Cloudflare Pages 会自动识别
- * 
- * 路由规则：
- *   /api/chat   → functions/api/chat.js
- *   /api/search → functions/api/search.js
- *   /api/models → functions/api/models.js
+ * Cloudflare Worker - AI 问答系统后端 API
+ * 同时托管静态前端文件
  */
 
-// 注意：API 密钥通过 Cloudflare Dashboard 设置环境变量
-// Pages → Settings → Environment variables → 添加 SILICONFLOW_API_KEY
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
 
-export async function onRequest(context) {
-  const { request, env } = context;
-  const url = new URL(request.url);
+    // CORS 预检请求
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+          'Access-Control-Max-Age': '86400',
+        },
+      });
+    }
 
-  // CORS 预检请求
-  if (request.method === 'OPTIONS') {
-    return new Response(null, {
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Max-Age': '86400',
-      },
-    });
-  }
+    // API 路由
+    if (url.pathname === '/api/chat' && request.method === 'POST') {
+      return handleChat(request, env);
+    }
+    if (url.pathname === '/api/search' && request.method === 'POST') {
+      return handleSearch(request, env);
+    }
+    if (url.pathname === '/api/models' && request.method === 'GET') {
+      return handleModels(env);
+    }
 
-  // 聊天 API（流式响应）
-  if (url.pathname === '/api/chat' && request.method === 'POST') {
-    return handleChat(request, env);
-  }
-
-  // 搜索 API
-  if (url.pathname === '/api/search' && request.method === 'POST') {
-    return handleSearch(request, env);
-  }
-
-  // 模型信息 API
-  if (url.pathname === '/api/models' && request.method === 'GET') {
-    return handleModels(env);
-  }
-
-  return new Response('Not Found', { status: 404 });
-}
+    // 静态文件 - 由 Cloudflare 的 assets 功能自动处理
+    // 如果请求不是 API，Cloudflare 会自动从 assets 目录提供静态文件
+    return env.ASSETS.fetch(request);
+  },
+};
 
 /**
  * 处理聊天请求 - 流式 SSE 响应
@@ -77,10 +68,8 @@ async function handleChat(request, env) {
     );
   }
 
-  // 深拷贝消息
   const apiMessages = messages.map(m => ({ role: m.role, content: m.content }));
 
-  // 如果启用联网搜索，将搜索结果注入到最后一条用户消息
   if (enableSearch && apiMessages.length) {
     let lastUserMsg = null;
     for (let i = apiMessages.length - 1; i >= 0; i--) {
@@ -89,7 +78,6 @@ async function handleChat(request, env) {
         break;
       }
     }
-
     if (lastUserMsg) {
       const searchContext = await buildSearchContext(lastUserMsg.content);
       if (searchContext) {
@@ -98,7 +86,6 @@ async function handleChat(request, env) {
     }
   }
 
-  // 创建流式响应
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
@@ -117,9 +104,6 @@ async function handleChat(request, env) {
   });
 }
 
-/**
- * 流式调用硅基流动 API
- */
 async function streamChat(writer, encoder, messages, enableSearch, apiKey) {
   try {
     if (enableSearch) {
@@ -179,21 +163,11 @@ async function streamChat(writer, encoder, messages, enableSearch, apiKey) {
           const parsed = JSON.parse(data);
           if (parsed.choices && parsed.choices.length > 0) {
             const delta = parsed.choices[0].delta;
-
-            // 思考链内容（DeepSeek-R1 特有）
             if (delta.reasoning_content) {
-              await writeSSE(writer, encoder, {
-                type: 'reasoning',
-                content: delta.reasoning_content,
-              });
+              await writeSSE(writer, encoder, { type: 'reasoning', content: delta.reasoning_content });
             }
-
-            // 正式回答内容
             if (delta.content) {
-              await writeSSE(writer, encoder, {
-                type: 'content',
-                content: delta.content,
-              });
+              await writeSSE(writer, encoder, { type: 'content', content: delta.content });
             }
           }
         } catch {
@@ -205,18 +179,12 @@ async function streamChat(writer, encoder, messages, enableSearch, apiKey) {
     await writeSSE(writer, encoder, '[DONE]');
     writer.close();
   } catch (error) {
-    await writeSSE(writer, encoder, {
-      type: 'error',
-      content: error.message || '未知错误',
-    });
+    await writeSSE(writer, encoder, { type: 'error', content: error.message || '未知错误' });
     await writeSSE(writer, encoder, '[DONE]');
     writer.close();
   }
 }
 
-/**
- * 写入 SSE 格式数据
- */
 async function writeSSE(writer, encoder, data) {
   if (typeof data === 'string') {
     await writer.write(encoder.encode(`data: ${data}\n\n`));
@@ -225,38 +193,23 @@ async function writeSSE(writer, encoder, data) {
   }
 }
 
-/**
- * 处理搜索请求
- */
 async function handleSearch(request, env) {
   let body;
   try {
     body = await request.json();
   } catch {
-    return new Response(
-      JSON.stringify({ error: '请求格式错误' }),
-      { status: 400, headers: corsHeaders() }
-    );
+    return new Response(JSON.stringify({ error: '请求格式错误' }), { status: 400, headers: corsHeaders() });
   }
 
   const query = body.query || '';
   if (!query) {
-    return new Response(
-      JSON.stringify({ error: '搜索关键词不能为空' }),
-      { status: 400, headers: corsHeaders() }
-    );
+    return new Response(JSON.stringify({ error: '搜索关键词不能为空' }), { status: 400, headers: corsHeaders() });
   }
 
   const results = await webSearch(query);
-  return new Response(
-    JSON.stringify({ results }),
-    { headers: corsHeaders() }
-  );
+  return new Response(JSON.stringify({ results }), { headers: corsHeaders() });
 }
 
-/**
- * 处理模型信息请求
- */
 function handleModels(env) {
   return new Response(
     JSON.stringify({
@@ -268,19 +221,11 @@ function handleModels(env) {
   );
 }
 
-/**
- * DuckDuckGo 联网搜索
- */
 async function webSearch(query, maxResults = 5) {
   try {
     const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-
-    const resp = await fetch(url, {
-      headers: { 'User-Agent': 'AI-Chat-Assistant/1.0' },
-    });
-
+    const resp = await fetch(url, { headers: { 'User-Agent': 'AI-Chat-Assistant/1.0' } });
     if (!resp.ok) return [];
-
     const data = await resp.json();
     const results = [];
 
@@ -310,9 +255,6 @@ async function webSearch(query, maxResults = 5) {
   }
 }
 
-/**
- * 构建搜索上下文
- */
 async function buildSearchContext(query) {
   const results = await webSearch(query);
   if (!results.length) return '';
@@ -328,9 +270,6 @@ async function buildSearchContext(query) {
   return context;
 }
 
-/**
- * CORS 响应头
- */
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',

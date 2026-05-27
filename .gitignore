@@ -4,3 +4,11 @@
 !.dev.vars.example
 .env*
 !.env.example
+
+# project files
+__pycache__/
+*.pyc
+node_modules/
+.DS_Store
+upload_to_github.py
+worker/
