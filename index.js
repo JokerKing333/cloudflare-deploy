@@ -99,17 +99,22 @@ async function handleChat(request, env) {
       searchContext = await buildSearchContext(lastUserMsg.content);
       
       if (searchContext) {
-        if (MODEL_CONFIG.searchInjectionMode === 'system') {
-          // 老版本模型适配：将搜索结果作为 system 消息注入到消息列表开头
-          // 这样模型能更好地理解搜索上下文，而不是将其视为用户输入的一部分
-          apiMessages.unshift({
-            role: 'system',
-            content: searchContext,
-          });
-        } else {
-          // 默认方式：拼接到用户消息末尾
-          lastUserMsg.content = lastUserMsg.content + searchContext;
-        }
+        // 老版本模型适配：同时注入 system 消息和 user 消息
+        // 因为老版本 R1 模型对 system 角色的支持不稳定
+        // 双保险策略确保搜索上下文能被模型接收
+        apiMessages.unshift({
+          role: 'system',
+          content: searchContext,
+        });
+        // 同时在用户消息末尾追加搜索提示（老版本模型更关注 user 消息）
+        lastUserMsg.content = lastUserMsg.content + '\n\n[系统提示：请参考上述搜索结果回答，注意当前日期是' + getCurrentDate() + ']';
+      } else {
+        // 搜索失败时，至少注入当前日期信息，防止模型用过时日期
+        apiMessages.unshift({
+          role: 'system',
+          content: '当前日期是' + getCurrentDate() + '。请基于你的知识回答用户问题，注意时效性。',
+        });
+        lastUserMsg.content = lastUserMsg.content + '\n\n[系统提示：当前日期是' + getCurrentDate() + '，请注意时效性]';
       }
     }
   }
@@ -262,8 +267,8 @@ function handleModels(env) {
 
 /**
  * 联网搜索 - 多源搜索策略
- * 主搜索源：DuckDuckGo Instant Answer API
- * 备用搜索源：Bing 搜索（通过 HTML 抓取）
+ * 主搜索源：Bing 搜索（更可靠，Cloudflare Workers IP 不会被封）
+ * 备用搜索源：DuckDuckGo Instant Answer API
  * 
  * 老版本模型适配：
  * - 搜索结果需要更简洁、更结构化的格式
@@ -271,15 +276,78 @@ function handleModels(env) {
  * - 优先返回高质量摘要
  */
 async function webSearch(query, maxResults = 5) {
-  // 尝试 DuckDuckGo API
-  let results = await duckduckgoSearch(query, maxResults);
+  // 先尝试 Bing 搜索（在 Cloudflare Workers 中更可靠）
+  let results = await bingSearch(query, maxResults);
   
-  // 如果 DuckDuckGo 返回空结果，尝试备用搜索
+  // 如果 Bing 返回空结果，尝试 DuckDuckGo
+  if (!results.length) {
+    results = await duckduckgoSearch(query, maxResults);
+  }
+  
+  // 如果 DuckDuckGo 也返回空，尝试 DuckDuckGo Lite
   if (!results.length) {
     results = await fallbackSearch(query, maxResults);
   }
   
   return results;
+}
+
+/**
+ * Bing 搜索 - 通过 HTML 抓取
+ * Bing 对 Cloudflare Workers IP 更友好
+ */
+async function bingSearch(query, maxResults) {
+  try {
+    const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=${maxResults}`;
+    const resp = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      },
+    });
+
+    if (!resp.ok) return [];
+
+    const html = await resp.text();
+    const results = [];
+
+    // 解析 Bing 搜索结果
+    // Bing 结果格式: <li class="b_algo"><h2><a href="url">title</a></h2><p>snippet</p></li>
+    const algoRegex = /<li class="b_algo"[^>]*>([\s\S]*?)<\/li>/gi;
+    let algoMatch;
+    
+    while ((algoMatch = algoRegex.exec(html)) !== null && results.length < maxResults) {
+      const block = algoMatch[1];
+      
+      // 提取标题和链接
+      const titleMatch = block.match(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/i);
+      // 提取摘要
+      const snippetMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
+      
+      if (titleMatch) {
+        const url = titleMatch[1];
+        const title = titleMatch[2].replace(/<[^>]*>/g, '').trim();
+        const snippet = snippetMatch 
+          ? snippetMatch[1].replace(/<[^>]*>/g, '').trim() 
+          : '';
+        
+        if (title && url && !url.includes('bing.com')) {
+          results.push({
+            title: truncateText(title, 80),
+            url: url,
+            snippet: truncateText(snippet, 300),
+            source: 'Bing',
+          });
+        }
+      }
+    }
+
+    return results;
+  } catch (error) {
+    console.error('Bing 搜索出错:', error.message);
+    return [];
+  }
 }
 
 /**
@@ -404,6 +472,21 @@ function truncateText(text, maxLength) {
 }
 
 /**
+ * 获取当前日期字符串（北京时间）
+ */
+function getCurrentDate() {
+  const now = new Date();
+  // 转换为北京时间 (UTC+8)
+  const bjTime = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  const year = bjTime.getUTCFullYear();
+  const month = String(bjTime.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(bjTime.getUTCDate()).padStart(2, '0');
+  const hours = String(bjTime.getUTCHours()).padStart(2, '0');
+  const minutes = String(bjTime.getUTCMinutes()).padStart(2, '0');
+  return `${year}年${month}月${day}日 ${hours}:${minutes}（北京时间）`;
+}
+
+/**
  * 构建搜索上下文 - 老版本模型适配版
  * 
  * 适配策略：
@@ -420,8 +503,9 @@ async function buildSearchContext(query) {
     return '';
   }
 
-  // 老版本模型适配：使用更简洁的格式
-  let context = '你是一个AI助手。以下是用户问题的网络搜索结果，请参考这些信息回答。如果搜索结果与问题不相关，请忽略并基于你的知识回答。\n\n';
+  // 老版本模型适配：使用更简洁的格式，并强调当前日期
+  let context = `当前日期：${getCurrentDate()}\n\n`;
+  context += '以下是用户问题「' + query + '」的网络搜索结果，你必须参考这些信息来回答：\n\n';
   context += '=== 搜索结果 ===\n';
   
   results.forEach((r, i) => {
@@ -433,7 +517,7 @@ async function buildSearchContext(query) {
   });
   
   context += '=== 搜索结束 ===\n';
-  context += '请基于以上搜索结果回答用户问题。如果搜索结果包含相关信息，请在回答中引用；如果搜索结果不相关或为空，请基于你的知识回答。';
+  context += '重要：你必须基于以上搜索结果回答用户问题。在回答中引用搜索到的信息，并注明来源。如果搜索结果与问题不相关，请说明并基于你的知识回答。';
 
   // 限制上下文总长度（老版本模型上下文窗口较小）
   const MAX_CONTEXT_LENGTH = 3000;
