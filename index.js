@@ -301,6 +301,13 @@ async function streamChat(writer, encoder, messages, enableSearch, apiKey, searc
       await writeSSE(writer, encoder, { type: 'search_end' });
     }
 
+    // 检查 response.body 是否存在（防止 iOS/某些环境下 body 为 null）
+    if (!response.body) {
+      await writeSSE(writer, encoder, { type: 'error', content: 'API 响应异常（response.body 为空），请重试' });
+      await writeSSE(writer, encoder, '[DONE]');
+      return;
+    }
+
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';

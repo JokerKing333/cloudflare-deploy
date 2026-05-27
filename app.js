@@ -762,6 +762,11 @@ async function sendMessage() {
             throw new Error(`HTTP ${response.status}`);
         }
         
+        // iOS Safari 兼容：检查 response.body 是否存在
+        if (!response.body) {
+            throw new Error('浏览器不支持流式响应（response.body 为空），请尝试刷新页面');
+        }
+        
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         
@@ -1188,6 +1193,11 @@ async function regenerateAiResponse(userMsgIndex) {
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
+        }
+        
+        // iOS Safari 兼容：检查 response.body 是否存在
+        if (!response.body) {
+            throw new Error('浏览器不支持流式响应（response.body 为空），请尝试刷新页面');
         }
         
         const reader = response.body.getReader();
