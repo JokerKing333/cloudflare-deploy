@@ -1,7 +1,21 @@
 /**
  * Cloudflare Worker - AI 问答系统后端 API
  * 同时托管静态前端文件
+ * 
+ * 模型适配说明：
+ * - 当前使用 deepseek-ai/DeepSeek-R1-0528-Qwen3-8B（老版本 R1 模型）
+ * - 该模型对联网搜索的 prompt 格式有特殊要求
+ * - 搜索结果需要以更结构化的 system 消息注入，而非拼接到 user 消息
  */
+
+// 模型配置
+const MODEL_CONFIG = {
+  model: 'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B',
+  // 老版本 R1 模型可能不支持 reasoning_content，需要兼容处理
+  supportsReasoning: true,
+  // 老版本模型对搜索上下文的处理方式：'system' = 注入为 system 消息, 'user' = 拼接到 user 消息
+  searchInjectionMode: 'system',
+};
 
 export default {
   async fetch(request, env, ctx) {
@@ -31,7 +45,6 @@ export default {
     }
 
     // 静态文件 - 由 Cloudflare 的 assets 功能自动处理
-    // 如果请求不是 API，Cloudflare 会自动从 assets 目录提供静态文件
     return env.ASSETS.fetch(request);
   },
 };
@@ -68,9 +81,13 @@ async function handleChat(request, env) {
     );
   }
 
+  // 构建 API 消息列表
   const apiMessages = messages.map(m => ({ role: m.role, content: m.content }));
 
+  // 联网搜索：根据模型配置选择注入方式
+  let searchContext = '';
   if (enableSearch && apiMessages.length) {
+    // 找到最后一条用户消息
     let lastUserMsg = null;
     for (let i = apiMessages.length - 1; i >= 0; i--) {
       if (apiMessages[i].role === 'user') {
@@ -79,9 +96,20 @@ async function handleChat(request, env) {
       }
     }
     if (lastUserMsg) {
-      const searchContext = await buildSearchContext(lastUserMsg.content);
+      searchContext = await buildSearchContext(lastUserMsg.content);
+      
       if (searchContext) {
-        lastUserMsg.content = lastUserMsg.content + searchContext;
+        if (MODEL_CONFIG.searchInjectionMode === 'system') {
+          // 老版本模型适配：将搜索结果作为 system 消息注入到消息列表开头
+          // 这样模型能更好地理解搜索上下文，而不是将其视为用户输入的一部分
+          apiMessages.unshift({
+            role: 'system',
+            content: searchContext,
+          });
+        } else {
+          // 默认方式：拼接到用户消息末尾
+          lastUserMsg.content = lastUserMsg.content + searchContext;
+        }
       }
     }
   }
@@ -90,7 +118,7 @@ async function handleChat(request, env) {
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
 
-  streamChat(writer, encoder, apiMessages, enableSearch, API_KEY).catch(err => {
+  streamChat(writer, encoder, apiMessages, enableSearch, API_KEY, searchContext).catch(err => {
     console.error('Stream error:', err);
   });
 
@@ -104,9 +132,10 @@ async function handleChat(request, env) {
   });
 }
 
-async function streamChat(writer, encoder, messages, enableSearch, apiKey) {
+async function streamChat(writer, encoder, messages, enableSearch, apiKey, searchContext) {
   try {
-    if (enableSearch) {
+    // 发送搜索开始状态
+    if (enableSearch && searchContext) {
       await writeSSE(writer, encoder, { type: 'search_start' });
     }
 
@@ -117,26 +146,32 @@ async function streamChat(writer, encoder, messages, enableSearch, apiKey) {
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B',
+        model: MODEL_CONFIG.model,
         messages: messages,
         stream: true,
         temperature: 0.7,
         max_tokens: 4096,
+        // 老版本 R1 模型兼容参数
+        top_p: 0.9,
+        frequency_penalty: 0,
+        presence_penalty: 0,
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('API Error:', response.status, errorText);
       await writeSSE(writer, encoder, {
         type: 'error',
-        content: `API 请求失败 (${response.status}): ${errorText}`,
+        content: `API 请求失败 (${response.status}): ${errorText.substring(0, 200)}`,
       });
       await writeSSE(writer, encoder, '[DONE]');
       writer.close();
       return;
     }
 
-    if (enableSearch) {
+    // 搜索完成
+    if (enableSearch && searchContext) {
       await writeSSE(writer, encoder, { type: 'search_end' });
     }
 
@@ -163,6 +198,9 @@ async function streamChat(writer, encoder, messages, enableSearch, apiKey) {
           const parsed = JSON.parse(data);
           if (parsed.choices && parsed.choices.length > 0) {
             const delta = parsed.choices[0].delta;
+            
+            // 老版本模型兼容：同时检查 reasoning_content 和 content
+            // 某些老版本 R1 模型可能将思考内容放在 content 中而非 reasoning_content
             if (delta.reasoning_content) {
               await writeSSE(writer, encoder, { type: 'reasoning', content: delta.reasoning_content });
             }
@@ -170,8 +208,8 @@ async function streamChat(writer, encoder, messages, enableSearch, apiKey) {
               await writeSSE(writer, encoder, { type: 'content', content: delta.content });
             }
           }
-        } catch {
-          // 忽略解析错误
+        } catch (parseErr) {
+          // 忽略解析错误，继续处理下一行
         }
       }
     }
@@ -179,6 +217,7 @@ async function streamChat(writer, encoder, messages, enableSearch, apiKey) {
     await writeSSE(writer, encoder, '[DONE]');
     writer.close();
   } catch (error) {
+    console.error('Stream error:', error.message);
     await writeSSE(writer, encoder, { type: 'error', content: error.message || '未知错误' });
     await writeSSE(writer, encoder, '[DONE]');
     writer.close();
@@ -214,58 +253,193 @@ function handleModels(env) {
   return new Response(
     JSON.stringify({
       provider: 'siliconflow',
-      model: 'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B',
+      model: MODEL_CONFIG.model,
       base_url: 'https://api.siliconflow.cn/v1',
     }),
     { headers: corsHeaders() }
   );
 }
 
+/**
+ * 联网搜索 - 多源搜索策略
+ * 主搜索源：DuckDuckGo Instant Answer API
+ * 备用搜索源：Bing 搜索（通过 HTML 抓取）
+ * 
+ * 老版本模型适配：
+ * - 搜索结果需要更简洁、更结构化的格式
+ * - 限制摘要长度，避免 token 超限
+ * - 优先返回高质量摘要
+ */
 async function webSearch(query, maxResults = 5) {
+  // 尝试 DuckDuckGo API
+  let results = await duckduckgoSearch(query, maxResults);
+  
+  // 如果 DuckDuckGo 返回空结果，尝试备用搜索
+  if (!results.length) {
+    results = await fallbackSearch(query, maxResults);
+  }
+  
+  return results;
+}
+
+/**
+ * DuckDuckGo Instant Answer API
+ */
+async function duckduckgoSearch(query, maxResults) {
   try {
     const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-    const resp = await fetch(url, { headers: { 'User-Agent': 'AI-Chat-Assistant/1.0' } });
+    const resp = await fetch(url, { 
+      headers: { 
+        'User-Agent': 'AI-Chat-Assistant/1.0',
+        'Accept': 'application/json',
+      } 
+    });
+    
     if (!resp.ok) return [];
+    
     const data = await resp.json();
     const results = [];
 
-    if (data.AbstractText) {
+    // 优先获取 Abstract（DuckDuckGo 精选摘要）
+    if (data.AbstractText && data.AbstractText.trim()) {
       results.push({
         title: data.AbstractSource || 'DuckDuckGo',
         url: data.AbstractURL || '',
-        snippet: data.AbstractText,
+        snippet: truncateText(data.AbstractText, 300),
+        source: 'DuckDuckGo',
       });
     }
 
+    // 获取 RelatedTopics
     const topics = data.RelatedTopics || [];
-    for (const topic of topics.slice(0, maxResults)) {
-      if (topic && topic.Text) {
+    for (const topic of topics) {
+      if (results.length >= maxResults) break;
+      
+      if (topic && topic.Text && topic.Text.trim()) {
+        const title = topic.FirstURL 
+          ? topic.FirstURL.split('/').pop().replace(/_/g, ' ').replace(/-/g, ' ')
+          : '相关结果';
         results.push({
-          title: (topic.FirstURL || '').split('/').pop().replace(/_/g, ' '),
+          title: truncateText(title, 80),
           url: topic.FirstURL || '',
-          snippet: topic.Text,
+          snippet: truncateText(topic.Text.replace(/<[^>]*>/g, ''), 300),
+          source: 'DuckDuckGo',
         });
       }
     }
 
     return results.slice(0, maxResults);
   } catch (error) {
-    console.error('搜索出错:', error);
+    console.error('DuckDuckGo 搜索出错:', error.message);
     return [];
   }
 }
 
-async function buildSearchContext(query) {
-  const results = await webSearch(query);
-  if (!results.length) return '';
+/**
+ * 备用搜索 - 使用 DuckDuckGo HTML 搜索
+ * 当 Instant Answer API 返回空结果时的降级方案
+ */
+async function fallbackSearch(query, maxResults) {
+  try {
+    // 使用 DuckDuckGo Lite 版本（更轻量，返回 HTML）
+    const url = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
+    const resp = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+    });
 
-  let context = '\n\n【以下是从互联网搜索到的相关信息，请参考这些信息回答用户问题】\n';
+    if (!resp.ok) return [];
+
+    const html = await resp.text();
+    const results = [];
+
+    // 解析 DuckDuckGo Lite 的 HTML 结果
+    // 结果格式: <a href="url">title</a><span>snippet</span>
+    const linkRegex = /<a[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/gi;
+    const snippetRegex = /<span class="snippet"[^>]*>([^<]*)<\/span>/gi;
+    
+    let linkMatch;
+    const links = [];
+    while ((linkMatch = linkRegex.exec(html)) !== null) {
+      const url = linkMatch[1];
+      const title = linkMatch[2].trim();
+      // 过滤掉 DuckDuckGo 内部链接
+      if (url && !url.includes('duckduckgo.com') && title && !title.includes('>')) {
+        links.push({ url, title });
+      }
+    }
+
+    let snippetMatch;
+    const snippets = [];
+    while ((snippetMatch = snippetRegex.exec(html)) !== null) {
+      snippets.push(snippetMatch[1].trim());
+    }
+
+    // 配对链接和摘要
+    for (let i = 0; i < Math.min(links.length, maxResults); i++) {
+      results.push({
+        title: truncateText(links[i].title, 80),
+        url: links[i].url,
+        snippet: truncateText(snippets[i] || '', 300),
+        source: 'DuckDuckGo Lite',
+      });
+    }
+
+    return results;
+  } catch (error) {
+    console.error('备用搜索出错:', error.message);
+    return [];
+  }
+}
+
+/**
+ * 截断文本，确保不超过指定长度
+ */
+function truncateText(text, maxLength) {
+  if (!text) return '';
+  if (text.length <= maxLength) return text;
+  return text.substring(0, maxLength - 3) + '...';
+}
+
+/**
+ * 构建搜索上下文 - 老版本模型适配版
+ * 
+ * 适配策略：
+ * 1. 使用更简洁的格式，减少 token 消耗
+ * 2. 明确指示模型如何使用搜索结果
+ * 3. 限制上下文长度，避免超出老版本模型的上下文窗口
+ * 4. 如果搜索结果为空，返回空字符串（不注入无效上下文）
+ */
+async function buildSearchContext(query) {
+  const results = await webSearch(query, 5);
+  
+  if (!results.length) {
+    console.log('搜索未返回结果，跳过上下文注入');
+    return '';
+  }
+
+  // 老版本模型适配：使用更简洁的格式
+  let context = '你是一个AI助手。以下是用户问题的网络搜索结果，请参考这些信息回答。如果搜索结果与问题不相关，请忽略并基于你的知识回答。\n\n';
+  context += '=== 搜索结果 ===\n';
+  
   results.forEach((r, i) => {
-    context += `\n[${i + 1}] ${r.title}\n`;
-    context += `    链接: ${r.url}\n`;
-    context += `    摘要: ${r.snippet}\n`;
+    context += `[${i + 1}] ${r.title}\n`;
+    if (r.url) {
+      context += `来源: ${r.url}\n`;
+    }
+    context += `内容: ${r.snippet}\n\n`;
   });
-  context += '\n【请基于以上搜索结果回答用户问题，并在回答末尾注明参考来源】\n';
+  
+  context += '=== 搜索结束 ===\n';
+  context += '请基于以上搜索结果回答用户问题。如果搜索结果包含相关信息，请在回答中引用；如果搜索结果不相关或为空，请基于你的知识回答。';
+
+  // 限制上下文总长度（老版本模型上下文窗口较小）
+  const MAX_CONTEXT_LENGTH = 3000;
+  if (context.length > MAX_CONTEXT_LENGTH) {
+    context = context.substring(0, MAX_CONTEXT_LENGTH - 50) + '\n...(搜索结果已截断)\n=== 搜索结束 ===';
+  }
 
   return context;
 }
