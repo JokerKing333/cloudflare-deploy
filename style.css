@@ -3,8 +3,6 @@
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-    -webkit-tap-highlight-color: transparent;
-    -webkit-touch-callout: none;
 }
 
 :root {
@@ -30,37 +28,16 @@
     --radius: 12px;
     --radius-sm: 8px;
     --transition: 0.2s ease;
-    /* 安全区域变量 */
-    --safe-area-top: env(safe-area-inset-top, 0px);
-    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
-    --safe-area-left: env(safe-area-inset-left, 0px);
-    --safe-area-right: env(safe-area-inset-right, 0px);
-}
-
-html {
-    height: 100%;
-    /* iOS Safari 防止橡皮筋效果导致的问题 */
-    overflow: hidden;
-    -webkit-overflow-scrolling: touch;
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
     background: var(--bg-primary);
     color: var(--text-primary);
     display: flex;
     height: 100vh;
-    height: 100dvh;
     overflow: hidden;
     line-height: 1.6;
-    /* 安全区域适配 */
-    padding-top: var(--safe-area-top);
-    padding-bottom: var(--safe-area-bottom);
-    padding-left: var(--safe-area-left);
-    padding-right: var(--safe-area-right);
-    /* iOS Safari 兼容 */
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
 }
 
 /* ========== 侧边栏 ========== */
@@ -85,7 +62,6 @@ body {
 .sidebar-header {
     padding: 16px;
     border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
 }
 
 .new-chat-btn {
@@ -103,10 +79,6 @@ body {
     justify-content: center;
     gap: 8px;
     transition: all var(--transition);
-    /* 移动端触摸优化 */
-    touch-action: manipulation;
-    -webkit-user-select: none;
-    user-select: none;
 }
 
 .new-chat-btn:hover {
@@ -114,16 +86,10 @@ body {
     transform: translateY(-1px);
 }
 
-.new-chat-btn:active {
-    transform: scale(0.97);
-}
-
 .chat-history {
     flex: 1;
-    min-height: 0;
     overflow-y: auto;
     padding: 8px;
-    -webkit-overflow-scrolling: touch;
 }
 
 .chat-history-item {
@@ -140,9 +106,6 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
-    touch-action: manipulation;
-    -webkit-user-select: none;
-    user-select: none;
 }
 
 .chat-history-item:hover {
@@ -162,15 +125,9 @@ body {
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    padding: 6px;
+    padding: 2px;
     border-radius: 4px;
     transition: all var(--transition);
-    touch-action: manipulation;
-    min-width: 28px;
-    min-height: 28px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
 }
 
 .chat-history-item:hover .delete-btn {
@@ -185,7 +142,6 @@ body {
 .sidebar-footer {
     padding: 16px;
     border-top: 1px solid var(--border);
-    flex-shrink: 0;
 }
 
 .user-info {
@@ -207,7 +163,6 @@ body {
     justify-content: center;
     font-size: 14px;
     font-weight: 600;
-    flex-shrink: 0;
 }
 
 /* ========== 主内容区 ========== */
@@ -216,7 +171,6 @@ body {
     display: flex;
     flex-direction: column;
     min-width: 0;
-    position: relative;
 }
 
 /* 顶部栏 */
@@ -240,19 +194,11 @@ body {
     transition: all var(--transition);
     display: flex;
     align-items: center;
-    touch-action: manipulation;
-    min-width: 36px;
-    min-height: 36px;
-    justify-content: center;
 }
 
 .toggle-sidebar-btn:hover {
     background: var(--bg-hover);
     color: var(--text-primary);
-}
-
-.toggle-sidebar-btn:active {
-    transform: scale(0.95);
 }
 
 .model-badge {
@@ -271,9 +217,6 @@ body {
     padding: 20px;
     display: flex;
     flex-direction: column;
-    -webkit-overflow-scrolling: touch;
-    /* iOS 平滑滚动 */
-    scroll-behavior: smooth;
 }
 
 /* 欢迎页面 */
@@ -303,7 +246,6 @@ body {
     font-weight: 600;
     margin-bottom: 40px;
     color: var(--text-primary);
-    text-align: center;
 }
 
 .suggestion-cards {
@@ -324,9 +266,6 @@ body {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    touch-action: manipulation;
-    -webkit-user-select: none;
-    user-select: none;
 }
 
 .suggestion-card:hover {
@@ -334,10 +273,6 @@ body {
     border-color: var(--accent);
     transform: translateY(-2px);
     box-shadow: var(--shadow);
-}
-
-.suggestion-card:active {
-    transform: scale(0.98);
 }
 
 .suggestion-card svg {
@@ -444,9 +379,6 @@ body {
     border: none;
     cursor: pointer;
     transition: all var(--transition);
-    touch-action: manipulation;
-    min-width: 28px;
-    min-height: 28px;
 }
 
 .msg-action-btn:hover {
@@ -469,8 +401,6 @@ body {
     line-height: 1.7;
     color: var(--text-primary);
     word-wrap: break-word;
-    overflow-wrap: break-word;
-    word-break: break-word;
 }
 
 /* Markdown 样式 */
@@ -501,7 +431,7 @@ body {
     padding: 2px 6px;
     border-radius: 4px;
     font-size: 0.9em;
-    font-family: 'Fira Code', 'Cascadia Code', 'Consolas', 'Monaco', monospace;
+    font-family: 'Fira Code', 'Consolas', monospace;
 }
 
 /* ========== 代码展示组件 ========== */
@@ -522,7 +452,6 @@ body {
     background: rgba(255, 255, 255, 0.03);
     border-bottom: 1px solid var(--border);
     user-select: none;
-    -webkit-user-select: none;
 }
 
 .code-lang-label {
@@ -565,9 +494,6 @@ body {
     font-family: inherit;
     transition: all var(--transition);
     white-space: nowrap;
-    touch-action: manipulation;
-    -webkit-user-select: none;
-    user-select: none;
 }
 
 .code-action-btn:hover {
@@ -601,7 +527,6 @@ body {
     background: transparent;
     border: none;
     border-radius: 0;
-    -webkit-overflow-scrolling: touch;
 }
 
 .code-block-body pre code {
@@ -612,7 +537,11 @@ body {
     font-family: 'Fira Code', 'Cascadia Code', 'Consolas', 'Monaco', monospace;
     color: #d4d4d8;
     tab-size: 4;
-    -webkit-text-size-adjust: none;
+}
+
+/* 代码块行号（可选） */
+.code-block-body pre code {
+    counter-reset: line;
 }
 
 /* 流式输出中的代码块 */
@@ -643,6 +572,30 @@ body {
     50% { opacity: 1; }
 }
 
+/* 响应式代码块 */
+@media (max-width: 768px) {
+    .code-block-header {
+        padding: 6px 10px;
+    }
+
+    .code-action-btn {
+        padding: 4px 8px;
+        font-size: 11px;
+    }
+
+    .code-action-btn span {
+        display: none;
+    }
+
+    .code-block-body pre {
+        padding: 12px;
+    }
+
+    .code-block-body pre code {
+        font-size: 12px;
+    }
+}
+
 .message-text blockquote {
     border-left: 3px solid var(--accent);
     padding-left: 12px;
@@ -654,9 +607,6 @@ body {
     border-collapse: collapse;
     width: 100%;
     margin: 12px 0;
-    display: block;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
 }
 
 .message-text th, .message-text td {
@@ -710,8 +660,6 @@ body {
     padding: 16px 20px 20px;
     border-top: 1px solid var(--border);
     flex-shrink: 0;
-    /* 安全区域底部适配 */
-    padding-bottom: calc(20px + var(--safe-area-bottom));
 }
 
 .input-container {
@@ -744,11 +692,6 @@ body {
     max-height: 200px;
     line-height: 1.5;
     padding: 4px 0;
-    /* iOS Safari 修复 */
-    -webkit-appearance: none;
-    appearance: none;
-    /* 防止 iOS 自动缩放 */
-    font-size: 16px;
 }
 
 #messageInput::placeholder {
@@ -775,18 +718,11 @@ body {
     justify-content: center;
     transition: all var(--transition);
     flex-shrink: 0;
-    touch-action: manipulation;
-    -webkit-user-select: none;
-    user-select: none;
 }
 
 .search-toggle-btn:hover {
     color: var(--text-secondary);
     border-color: var(--text-muted);
-}
-
-.search-toggle-btn:active {
-    transform: scale(0.95);
 }
 
 .search-toggle-btn.active {
@@ -808,18 +744,11 @@ body {
     justify-content: center;
     transition: all var(--transition);
     flex-shrink: 0;
-    touch-action: manipulation;
-    -webkit-user-select: none;
-    user-select: none;
 }
 
 .send-btn:hover {
     background: var(--accent-hover);
     transform: scale(1.05);
-}
-
-.send-btn:active {
-    transform: scale(0.95);
 }
 
 .send-btn:disabled {
@@ -869,20 +798,13 @@ body {
     padding: 10px 14px;
     cursor: pointer;
     user-select: none;
-    -webkit-user-select: none;
     transition: background var(--transition);
     font-size: 13px;
     color: var(--text-secondary);
-    touch-action: manipulation;
-    min-height: 44px;
 }
 
 .thinking-chain-header:hover {
     background: rgba(108, 99, 255, 0.06);
-}
-
-.thinking-chain-header:active {
-    background: rgba(108, 99, 255, 0.1);
 }
 
 .thinking-chain-header .arrow {
@@ -919,7 +841,6 @@ body {
     overflow-y: auto;
     display: none;
     background: rgba(0, 0, 0, 0.15);
-    -webkit-overflow-scrolling: touch;
 }
 
 .thinking-chain-body.open {
@@ -958,6 +879,38 @@ body {
     color: #4ade80;
 }
 
+/* 响应式 */
+@media (max-width: 768px) {
+    .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        transform: translateX(-100%);
+    }
+
+    .sidebar.collapsed {
+        transform: translateX(-100%);
+    }
+
+    .sidebar:not(.collapsed) {
+        transform: translateX(0);
+    }
+
+    .suggestion-cards {
+        grid-template-columns: 1fr;
+    }
+
+    .welcome-screen h1 {
+        font-size: 22px;
+    }
+
+    /* 移动端消息操作按钮始终可见 */
+    .message-actions {
+        opacity: 1;
+    }
+}
+
 /* ========== 消息编辑区域 ========== */
 .edit-area {
     display: flex;
@@ -979,10 +932,6 @@ body {
     resize: vertical;
     outline: none;
     transition: border-color var(--transition);
-    -webkit-appearance: none;
-    appearance: none;
-    /* 防止 iOS 自动缩放 */
-    font-size: 16px;
 }
 
 .edit-textarea:focus {
@@ -998,7 +947,7 @@ body {
 
 .edit-save-btn,
 .edit-cancel-btn {
-    padding: 8px 18px;
+    padding: 6px 16px;
     border-radius: 6px;
     font-size: 13px;
     font-weight: 500;
@@ -1006,10 +955,6 @@ body {
     cursor: pointer;
     border: none;
     transition: all var(--transition);
-    touch-action: manipulation;
-    -webkit-user-select: none;
-    user-select: none;
-    min-height: 36px;
 }
 
 .edit-save-btn {
@@ -1020,10 +965,6 @@ body {
 .edit-save-btn:hover {
     background: var(--accent-hover);
     transform: translateY(-1px);
-}
-
-.edit-save-btn:active {
-    transform: scale(0.97);
 }
 
 .edit-cancel-btn {
@@ -1037,16 +978,11 @@ body {
     color: var(--text-primary);
 }
 
-.edit-cancel-btn:active {
-    transform: scale(0.97);
-}
-
 /* ========== 确认弹窗 ========== */
 .confirm-overlay {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.6);
-    -webkit-backdrop-filter: blur(4px);
     backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
@@ -1054,8 +990,6 @@ body {
     z-index: 1000;
     opacity: 0;
     transition: opacity 0.2s ease;
-    /* 安全区域适配 */
-    padding: var(--safe-area-top) var(--safe-area-right) var(--safe-area-bottom) var(--safe-area-left);
 }
 
 .confirm-overlay.visible {
@@ -1067,7 +1001,7 @@ body {
     border: 1px solid var(--border);
     border-radius: var(--radius);
     width: 400px;
-    max-width: calc(90vw - 32px);
+    max-width: 90vw;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
     transform: translateY(10px);
     transition: transform 0.2s ease;
@@ -1134,10 +1068,6 @@ body {
     cursor: pointer;
     border: none;
     transition: all var(--transition);
-    touch-action: manipulation;
-    -webkit-user-select: none;
-    user-select: none;
-    min-height: 40px;
 }
 
 .confirm-cancel-btn {
@@ -1151,10 +1081,6 @@ body {
     color: var(--text-primary);
 }
 
-.confirm-cancel-btn:active {
-    transform: scale(0.97);
-}
-
 .confirm-ok-btn {
     background: #ff6b6b;
     color: white;
@@ -1163,500 +1089,4 @@ body {
 .confirm-ok-btn:hover {
     background: #ff5252;
     transform: translateY(-1px);
-}
-
-.confirm-ok-btn:active {
-    transform: scale(0.97);
-}
-
-/* ========== 移动端遮罩层 ========== */
-.sidebar-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 99;
-    -webkit-backdrop-filter: blur(2px);
-    backdrop-filter: blur(2px);
-}
-
-/* ========== 响应式布局 ========== */
-
-/* 平板及以下 (≤1024px) */
-@media (max-width: 1024px) {
-    .sidebar {
-        width: 260px;
-        min-width: 260px;
-    }
-
-    .messages-list {
-        max-width: 100%;
-    }
-
-    .input-container {
-        max-width: 100%;
-    }
-}
-
-/* 手机端 (≤768px) */
-@media (max-width: 768px) {
-    /* 侧边栏改为浮层 */
-    .sidebar {
-        position: fixed;
-        left: 0;
-        top: 0;
-        bottom: 0;
-        width: 280px;
-        min-width: 280px;
-        max-height: 100vh;
-        max-height: 100dvh;
-        transform: translateX(-100%);
-        box-shadow: 4px 0 20px rgba(0, 0, 0, 0.5);
-        z-index: 200;
-        padding-top: var(--safe-area-top);
-        padding-bottom: var(--safe-area-bottom);
-    }
-
-    .sidebar:not(.collapsed) {
-        transform: translateX(0);
-    }
-
-    .sidebar-overlay {
-        display: block;
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 0.3s ease;
-    }
-
-    .sidebar-overlay.visible {
-        opacity: 1;
-        pointer-events: auto;
-    }
-
-    /* 顶部栏 */
-    .top-bar {
-        height: 48px;
-        padding: 0 12px;
-        gap: 10px;
-    }
-
-    .toggle-sidebar-btn {
-        padding: 6px;
-        min-width: 32px;
-        min-height: 32px;
-    }
-
-    .model-badge {
-        font-size: 11px;
-        padding: 3px 10px;
-    }
-
-    /* 聊天容器 */
-    .chat-container {
-        padding: 12px;
-    }
-
-    /* 欢迎页面 */
-    .welcome-screen {
-        padding: 20px 12px;
-    }
-
-    .welcome-logo {
-        width: 60px;
-        height: 60px;
-        border-radius: 16px;
-        margin-bottom: 16px;
-    }
-
-    .welcome-screen h1 {
-        font-size: 20px;
-        margin-bottom: 24px;
-    }
-
-    .suggestion-cards {
-        grid-template-columns: 1fr;
-        gap: 8px;
-    }
-
-    .suggestion-card {
-        padding: 14px;
-    }
-
-    .suggestion-card span {
-        font-size: 13px;
-    }
-
-    .suggestion-card p {
-        font-size: 11px;
-    }
-
-    /* 消息列表 */
-    .messages-list {
-        gap: 16px;
-        padding-bottom: 12px;
-    }
-
-    .message {
-        gap: 10px;
-    }
-
-    .message-avatar {
-        width: 30px;
-        height: 30px;
-        font-size: 14px;
-    }
-
-    .message-text {
-        font-size: 14px;
-        line-height: 1.6;
-    }
-
-    /* 消息操作按钮 - 移动端始终可见 */
-    .message-actions {
-        opacity: 1;
-    }
-
-    .msg-action-btn {
-        width: 32px;
-        height: 32px;
-        min-width: 32px;
-        min-height: 32px;
-    }
-
-    /* 代码块 */
-    .code-block-header {
-        padding: 6px 10px;
-    }
-
-    .code-action-btn {
-        padding: 4px 8px;
-        font-size: 11px;
-    }
-
-    .code-action-btn span {
-        display: none;
-    }
-
-    .code-block-body pre {
-        padding: 12px;
-    }
-
-    .code-block-body pre code {
-        font-size: 12px;
-    }
-
-    /* 思考链 */
-    .thinking-chain-header {
-        padding: 10px 12px;
-        font-size: 12px;
-        min-height: 44px;
-    }
-
-    .thinking-chain-body {
-        padding: 10px 12px;
-        font-size: 12px;
-        max-height: 200px;
-    }
-
-    /* 输入区域 */
-    .input-area {
-        padding: 10px 12px;
-        padding-bottom: calc(12px + var(--safe-area-bottom));
-    }
-
-    .input-container {
-        padding: 6px 10px;
-        gap: 6px;
-        border-radius: 24px;
-    }
-
-    #messageInput {
-        font-size: 16px;
-        padding: 6px 0;
-    }
-
-    .search-toggle-btn {
-        width: 32px;
-        height: 32px;
-    }
-
-    .send-btn {
-        width: 32px;
-        height: 32px;
-    }
-
-    .input-disclaimer {
-        font-size: 10px;
-        margin-top: 6px;
-    }
-
-    /* 确认弹窗 */
-    .confirm-dialog {
-        width: calc(100vw - 32px);
-        max-width: 400px;
-        border-radius: 16px;
-    }
-
-    .confirm-header {
-        padding: 16px 20px 0;
-    }
-
-    .confirm-header h3 {
-        font-size: 16px;
-    }
-
-    .confirm-body {
-        padding: 12px 20px;
-        font-size: 13px;
-    }
-
-    .confirm-footer {
-        padding: 12px 20px;
-        gap: 8px;
-    }
-
-    .confirm-cancel-btn,
-    .confirm-ok-btn {
-        padding: 10px 16px;
-        font-size: 14px;
-        min-height: 44px;
-        flex: 1;
-    }
-
-    /* 编辑区域 */
-    .edit-textarea {
-        font-size: 16px;
-        padding: 10px;
-    }
-
-    .edit-save-btn,
-    .edit-cancel-btn {
-        padding: 8px 16px;
-        min-height: 40px;
-    }
-
-    /* 思考中指示器 */
-    .thinking-indicator {
-        padding: 12px 16px;
-        font-size: 13px;
-    }
-}
-
-/* 小屏手机 (≤480px) */
-@media (max-width: 480px) {
-    .sidebar {
-        width: 85vw;
-        min-width: 85vw;
-        max-width: 320px;
-    }
-
-    .top-bar {
-        height: 44px;
-        padding: 0 10px;
-    }
-
-    .chat-container {
-        padding: 8px;
-    }
-
-    .welcome-screen {
-        padding: 16px 8px;
-    }
-
-    .welcome-logo {
-        width: 50px;
-        height: 50px;
-        border-radius: 14px;
-    }
-
-    .welcome-screen h1 {
-        font-size: 18px;
-        margin-bottom: 20px;
-    }
-
-    .suggestion-card {
-        padding: 12px;
-    }
-
-    .messages-list {
-        gap: 12px;
-    }
-
-    .message {
-        gap: 8px;
-    }
-
-    .message-avatar {
-        width: 28px;
-        height: 28px;
-        font-size: 12px;
-    }
-
-    .message-text {
-        font-size: 13px;
-    }
-
-    .message-text h1 { font-size: 1.2em; }
-    .message-text h2 { font-size: 1.1em; }
-    .message-text h3 { font-size: 1em; }
-
-    .input-area {
-        padding: 8px 8px;
-        padding-bottom: calc(10px + var(--safe-area-bottom));
-    }
-
-    .input-container {
-        padding: 4px 8px;
-        gap: 4px;
-        border-radius: 20px;
-    }
-
-    #messageInput {
-        font-size: 16px;
-        padding: 4px 0;
-    }
-
-    .search-toggle-btn {
-        width: 30px;
-        height: 30px;
-    }
-
-    .send-btn {
-        width: 30px;
-        height: 30px;
-    }
-
-    .input-disclaimer {
-        font-size: 9px;
-    }
-}
-
-/* 横屏手机 */
-@media (max-width: 768px) and (orientation: landscape) {
-    .top-bar {
-        height: 40px;
-    }
-
-    .chat-container {
-        padding: 8px 12px;
-    }
-
-    .welcome-screen {
-        padding: 12px;
-    }
-
-    .welcome-screen h1 {
-        font-size: 18px;
-        margin-bottom: 16px;
-    }
-
-    .suggestion-cards {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 8px;
-    }
-
-    .input-area {
-        padding: 6px 12px;
-        padding-bottom: calc(8px + var(--safe-area-bottom));
-    }
-
-    .input-container {
-        padding: 4px 10px;
-    }
-}
-
-/* ========== iOS Safari 兼容性修复 ========== */
-
-/* 修复 iOS Safari 输入框阴影 */
-input, textarea, button, select {
-    -webkit-appearance: none;
-    appearance: none;
-    border-radius: 0;
-}
-
-/* 修复 iOS Safari 点击闪烁 */
-* {
-    -webkit-tap-highlight-color: transparent;
-}
-
-/* 修复 iOS Safari overflow: hidden 问题 */
-body {
-    position: fixed;
-    width: 100%;
-    width: 100vw;
-}
-
-/* 修复 iOS Safari 100vh 问题（使用 dvh） */
-@supports (height: 100dvh) {
-    body {
-        height: 100dvh;
-    }
-}
-
-/* 修复 iOS 键盘弹出时页面布局 */
-@supports (-webkit-touch-callout: none) {
-    .input-area {
-        padding-bottom: calc(20px + var(--safe-area-bottom));
-    }
-
-    @media (max-width: 768px) {
-        .input-area {
-            padding-bottom: calc(12px + var(--safe-area-bottom));
-        }
-    }
-}
-
-/* 修复 Android Chrome 地址栏隐藏/显示导致的布局跳动 */
-@media (max-height: 500px) {
-    .welcome-screen {
-        padding: 8px;
-    }
-
-    .welcome-logo {
-        width: 40px;
-        height: 40px;
-        margin-bottom: 8px;
-    }
-
-    .welcome-screen h1 {
-        font-size: 16px;
-        margin-bottom: 12px;
-    }
-
-    .suggestion-cards {
-        gap: 6px;
-    }
-
-    .suggestion-card {
-        padding: 10px;
-    }
-}
-
-/* 修复移动端滚动穿透 */
-body.sidebar-open {
-    overflow: hidden;
-}
-
-/* 修复 iOS Safari 弹性滚动导致的背景露出 */
-.chat-container,
-.chat-history,
-.thinking-chain-body {
-    -webkit-overflow-scrolling: touch;
-}
-
-/* 确保按钮在移动端有足够的点击区域 */
-@media (pointer: coarse) {
-    .msg-action-btn,
-    .code-action-btn,
-    .search-toggle-btn,
-    .send-btn,
-    .toggle-sidebar-btn,
-    .chat-history-item .delete-btn {
-        min-width: 44px;
-        min-height: 44px;
-    }
-
-    .chat-history-item {
-        min-height: 44px;
-    }
 }

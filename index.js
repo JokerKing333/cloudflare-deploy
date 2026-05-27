@@ -113,24 +113,42 @@ const SEC_CH_UA_POOL = [
 ];
 
 // ==================== 搜索引擎配置 ====================
+// 优先使用国内搜索引擎（低延迟），国外引擎作为备用
 const SEARCH_ENGINES = [
   {
-    name: 'Bing',
-    buildUrl: (q, n) => `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=${n}&setlang=zh-cn`,
+    name: 'Bing_CN',
+    buildUrl: (q, n) => `https://cn.bing.com/search?q=${encodeURIComponent(q)}&count=${n}&setlang=zh-cn&mkt=zh-CN`,
     parseResults: parseBingResults,
-    referer: 'https://www.bing.com/',
+    referer: 'https://cn.bing.com/',
+    priority: 1,
   },
   {
-    name: 'DuckDuckGo_HTML',
-    buildUrl: (q) => `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`,
-    parseResults: parseDuckDuckGoHTMLResults,
-    referer: 'https://html.duckduckgo.com/',
+    name: 'Bing',
+    buildUrl: (q, n) => `https://www.bing.com/search?q=${encodeURIComponent(q)}&count=${n}&setlang=zh-cn&mkt=zh-CN`,
+    parseResults: parseBingResults,
+    referer: 'https://www.bing.com/',
+    priority: 2,
+  },
+  {
+    name: 'Sogou',
+    buildUrl: (q) => `https://www.sogou.com/web?query=${encodeURIComponent(q)}&ie=utf8`,
+    parseResults: parseSogouResults,
+    referer: 'https://www.sogou.com/',
+    priority: 3,
+  },
+  {
+    name: 'Baidu',
+    buildUrl: (q) => `https://www.baidu.com/s?wd=${encodeURIComponent(q)}&ie=utf-8&rn=10`,
+    parseResults: parseBaiduResults,
+    referer: 'https://www.baidu.com/',
+    priority: 4,
   },
   {
     name: 'DuckDuckGo_Lite',
     buildUrl: (q) => `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(q)}`,
     parseResults: parseDuckDuckGoLiteResults,
     referer: 'https://lite.duckduckgo.com/',
+    priority: 5,
   },
 ];
 
@@ -234,10 +252,21 @@ async function handleChat(request, env) {
 }
 
 async function streamChat(writer, encoder, messages, enableSearch, apiKey, searchContext) {
+  let heartbeatInterval = null;
+
   try {
     if (enableSearch && searchContext) {
       await writeSSE(writer, encoder, { type: 'search_start' });
     }
+
+    // iOS Safari SSE 兼容：每 15 秒发送心跳，防止连接被断开
+    heartbeatInterval = setInterval(async () => {
+      try {
+        await writeSSE(writer, encoder, { type: 'heartbeat' });
+      } catch {
+        clearInterval(heartbeatInterval);
+      }
+    }, 15000);
 
     const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
       method: 'POST',
@@ -265,7 +294,6 @@ async function streamChat(writer, encoder, messages, enableSearch, apiKey, searc
         content: `API 请求失败 (${response.status}): ${errorText.substring(0, 200)}`,
       });
       await writeSSE(writer, encoder, '[DONE]');
-      writer.close();
       return;
     }
 
@@ -310,12 +338,15 @@ async function streamChat(writer, encoder, messages, enableSearch, apiKey, searc
     }
 
     await writeSSE(writer, encoder, '[DONE]');
-    writer.close();
   } catch (error) {
     console.error('Stream error:', error.message);
-    await writeSSE(writer, encoder, { type: 'error', content: error.message || '未知错误' });
-    await writeSSE(writer, encoder, '[DONE]');
-    writer.close();
+    try {
+      await writeSSE(writer, encoder, { type: 'error', content: error.message || '未知错误' });
+      await writeSSE(writer, encoder, '[DONE]');
+    } catch {}
+  } finally {
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    try { writer.close(); } catch {}
   }
 }
 
@@ -359,20 +390,24 @@ function handleModels(env) {
 // ==================== 核心：联网搜索 + 爬虫 ====================
 
 /**
- * 联网搜索 - 多引擎并发 + 内容抓取
+ * 联网搜索 - 多引擎竞速 + 内容抓取
  * 
- * 流程：
- * 1. 多搜索引擎并发搜索（Bing + DuckDuckGo HTML + DuckDuckGo Lite）
- * 2. 合并去重结果
- * 3. 爬虫抓取网页完整内容
- * 4. 提取正文、清洗 HTML、截取关键段落
+ * 策略：
+ * 1. 按优先级排序搜索引擎（国内优先）
+ * 2. 所有引擎并发搜索，先到先得
+ * 3. 合并去重结果
+ * 4. 爬虫抓取网页完整内容
  */
 async function webSearch(query, maxResults = CRAWLER_CONFIG.searchMaxResults) {
-  // 第一步：多搜索引擎并发搜索
-  const searchPromises = SEARCH_ENGINES.map(engine =>
+  // 按优先级排序
+  const sortedEngines = [...SEARCH_ENGINES].sort((a, b) => (a.priority || 99) - (b.priority || 99));
+
+  // 所有引擎并发搜索
+  const searchPromises = sortedEngines.map(engine =>
     searchWithEngine(engine, query, maxResults)
   );
 
+  // 使用 Promise.allSettled 等待所有结果（不因单个失败而中断）
   const allEngineResults = await Promise.allSettled(searchPromises);
 
   // 合并所有引擎的结果
@@ -394,21 +429,25 @@ async function webSearch(query, maxResults = CRAWLER_CONFIG.searchMaxResults) {
     }
   }
 
-  // 质量排序：优先有摘要的、来自 Bing 的
+  // 质量排序：有摘要的优先，国内引擎优先
   uniqueResults.sort((a, b) => {
-    const scoreA = (a.snippet ? 2 : 0) + (a.source === 'Bing' ? 1 : 0);
-    const scoreB = (b.snippet ? 2 : 0) + (b.source === 'Bing' ? 1 : 0);
+    const scoreA = (a.snippet ? 3 : 0) + (isChineseSource(a.source) ? 2 : 0);
+    const scoreB = (b.snippet ? 3 : 0) + (isChineseSource(b.source) ? 2 : 0);
     return scoreB - scoreA;
   });
 
   const topResults = uniqueResults.slice(0, maxResults);
 
-  // 第二步：爬虫抓取网页内容
+  // 爬虫抓取网页内容
   if (topResults.length > 0) {
     return await enrichWithCrawler(topResults, query);
   }
 
   return topResults;
+}
+
+function isChineseSource(source) {
+  return ['Bing_CN', '搜狗', '百度'].includes(source);
 }
 
 /**
@@ -506,12 +545,96 @@ function parseBingResultBlock(block) {
 }
 
 /**
- * 解析 DuckDuckGo HTML 搜索结果
+ * 解析搜狗搜索结果
+ */
+function parseSogouResults(html, maxResults) {
+  const results = [];
+
+  // 搜狗结果格式: <div class="rb"><h3><a href="url">title</a></h3><p>snippet</p></div>
+  // 或 <div class="vrwrap"><h3><a>title</a></h3><p>snippet</p></div>
+  const blockRegex = /<div[^>]*class="[^"]*(?:rb|vrwrap|result)[^"]*"[^>]*>([\s\S]*?)<\/div>\s*(?=<div[^>]*class="[^"]*(?:rb|vrwrap|result)[^"]*"|$)/gi;
+  let match;
+
+  while ((match = blockRegex.exec(html)) !== null && results.length < maxResults) {
+    const block = match[1];
+    const linkMatch = block.match(/<a[^>]*href="([^"]*)"[^>]*id="[^"]*"[^>]*>([\s\S]*?)<\/a>/i)
+      || block.match(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/i);
+
+    if (linkMatch) {
+      let url = linkMatch[1];
+      // 搜狗使用重定向链接
+      if (url.includes('sogou.com/link')) {
+        const realUrlMatch = url.match(/url=([^&]*)/);
+        if (realUrlMatch) {
+          try { url = decodeURIComponent(realUrlMatch[1]); } catch {}
+        }
+      }
+
+      const title = linkMatch[2].replace(/<[^>]*>/g, '').trim();
+
+      if (title && url && !url.includes('sogou.com') && url.startsWith('http')) {
+        const snippetMatch = block.match(/<p[^>]*class="[^"]*(?:str_info|abstract|summary|space-txt)[^"]*"[^>]*>([\s\S]*?)<\/p>/i)
+          || block.match(/<p[^>]*>([\s\S]*?)<\/p>/i);
+
+        results.push({
+          title: truncateText(title, 100),
+          url,
+          snippet: snippetMatch ? truncateText(snippetMatch[1].replace(/<[^>]*>/g, '').trim(), 300) : '',
+          source: '搜狗',
+        });
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * 解析百度搜索结果
+ */
+function parseBaiduResults(html, maxResults) {
+  const results = [];
+
+  // 百度结果格式: <div class="result c-container"><h3><a>title</a></h3><div class="c-abstract">snippet</div></div>
+  const blockRegex = /<div[^>]*class="[^"]*(?:result|c-container)[^"]*"[^>]*>([\s\S]*?)<\/div>\s*(?=<div[^>]*class="[^"]*(?:result|c-container)[^"]*"|$)/gi;
+  let match;
+
+  while ((match = blockRegex.exec(html)) !== null && results.length < maxResults) {
+    const block = match[1];
+
+    // 跳过广告
+    if (block.includes('ec_ad') || block.includes('result-op')) continue;
+
+    const linkMatch = block.match(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/i);
+
+    if (linkMatch) {
+      let url = linkMatch[1];
+      const title = linkMatch[2].replace(/<[^>]*>/g, '').trim();
+
+      if (title && url && url.startsWith('http') && !url.includes('baidu.com')) {
+        const snippetMatch = block.match(/<span[^>]*class="[^"]*content-right_[^"]*"[^>]*>([\s\S]*?)<\/span>/i)
+          || block.match(/<div[^>]*class="[^"]*c-abstract[^"]*"[^>]*>([\s\S]*?)<\/div>/i)
+          || block.match(/<span[^>]*class="[^"]*c-color[^"]*"[^>]*>([\s\S]*?)<\/span>/i);
+
+        results.push({
+          title: truncateText(title, 100),
+          url,
+          snippet: snippetMatch ? truncateText(snippetMatch[1].replace(/<[^>]*>/g, '').trim(), 300) : '',
+          source: '百度',
+        });
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * 解析 DuckDuckGo HTML 搜索结果（保留作为备用）
  */
 function parseDuckDuckGoHTMLResults(html, maxResults) {
   const results = [];
 
-  // 结果块: <div class="result"> 或 <div class="web-result">
   const blockRegex = /<div[^>]*class="[^"]*(?:result|web-result)[^"]*"[^>]*>([\s\S]*?)<div[^>]*class="[^"]*(?:result|web-result)[^"]*"[^>]*>/gi;
   let match;
 

@@ -1,15 +1,7 @@
 /**
  * AI 智能助手 - 前端交互逻辑
  * 支持：思考链展示、联网搜索
- * 
- * 使用 Cloudflare Pages Functions，API 和前端在同一个域名下
- * 无需配置 API_BASE，直接使用相对路径即可
  */
-
-// ========== API 配置 ==========
-// Cloudflare Pages Functions 自动处理 /api/* 路由
-// 前端和 API 在同一个域名下，使用相对路径即可
-const API_BASE = '';
 
 // ========== 状态管理 ==========
 const state = {
@@ -42,138 +34,21 @@ function init() {
     loadConversations();
     loadModelInfo();
     bindEvents();
-    initMobileOptimizations();
     
     if (state.conversations.length > 0) {
         switchConversation(state.conversations[0].id);
     }
 }
 
-// ========== 移动端优化 ==========
-function initMobileOptimizations() {
-    // 检测是否为移动设备
-    const isMobile = /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent);
-    
-    if (isMobile) {
-        // 创建侧边栏遮罩层
-        const overlay = document.createElement('div');
-        overlay.className = 'sidebar-overlay';
-        overlay.id = 'sidebarOverlay';
-        document.body.appendChild(overlay);
-        
-        // 点击遮罩关闭侧边栏
-        overlay.addEventListener('click', () => {
-            if (!state.sidebarCollapsed) {
-                toggleSidebar();
-            }
-        });
-        
-        // 触摸滑动关闭侧边栏
-        let touchStartX = 0;
-        elements.sidebar.addEventListener('touchstart', (e) => {
-            touchStartX = e.touches[0].clientX;
-        }, { passive: true });
-        
-        elements.sidebar.addEventListener('touchmove', (e) => {
-            const touchX = e.touches[0].clientX;
-            const diff = touchStartX - touchX;
-            if (diff > 50) {
-                if (!state.sidebarCollapsed) {
-                    toggleSidebar();
-                }
-            }
-        }, { passive: true });
-        
-        // iOS 键盘适配
-        if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-            setupIOSKeyboardHandler();
-        }
-        
-        // Android 键盘适配
-        if (/Android/.test(navigator.userAgent)) {
-            setupAndroidKeyboardHandler();
-        }
-    }
-}
-
-// iOS 键盘弹出/收起处理
-function setupIOSKeyboardHandler() {
-    const input = elements.messageInput;
-    let initialHeight = window.innerHeight;
-    let keyboardOpen = false;
-    
-    // 监听 visualViewport 变化（iOS Safari 支持）
-    if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', () => {
-            const currentHeight = window.visualViewport.height;
-            const heightDiff = initialHeight - currentHeight;
-            
-            if (heightDiff > 150 && !keyboardOpen) {
-                // 键盘弹出
-                keyboardOpen = true;
-                scrollToBottom();
-                // 延迟滚动确保键盘动画完成
-                setTimeout(scrollToBottom, 300);
-            } else if (heightDiff < 50 && keyboardOpen) {
-                // 键盘收起
-                keyboardOpen = false;
-            }
-        });
-    }
-    
-    // 备用方案：监听 focus/blur
-    input.addEventListener('focus', () => {
-        if (!keyboardOpen) {
-            setTimeout(scrollToBottom, 300);
-        }
-    });
-    
-    // 修复 iOS Safari 双击缩放
-    input.addEventListener('touchstart', (e) => {
-        e.stopPropagation();
-    });
-}
-
-// Android 键盘适配
-function setupAndroidKeyboardHandler() {
-    const input = elements.messageInput;
-    let lastHeight = window.innerHeight;
-    
-    window.addEventListener('resize', () => {
-        const currentHeight = window.innerHeight;
-        const heightDiff = Math.abs(lastHeight - currentHeight);
-        
-        if (heightDiff > 100) {
-            // 键盘状态变化
-            scrollToBottom();
-            setTimeout(scrollToBottom, 200);
-        }
-        
-        lastHeight = currentHeight;
-    });
-    
-    input.addEventListener('focus', () => {
-        setTimeout(scrollToBottom, 300);
-    });
-}
-
 // 加载模型信息
 async function loadModelInfo() {
     try {
-        const res = await fetch(apiUrl('/api/models'));
+        const res = await fetch('/api/models');
         const data = await res.json();
         elements.modelBadge.textContent = data.model || 'AI 模型';
     } catch (e) {
         elements.modelBadge.textContent = 'AI 模型';
     }
-}
-
-// 构建 API 完整 URL
-function apiUrl(path) {
-    if (API_BASE) {
-        return API_BASE + path;
-    }
-    return path;
 }
 
 // 加载对话历史
@@ -383,9 +258,9 @@ function addMessageToUI(role, content, reasoning, index) {
                         <path d="M8 14h8"/>
                     </svg>
                     <span class="thinking-label">思考过程</span>
-                    <span class="arrow open">▶</span>
+                    <span class="arrow">▶</span>
                 </div>
-                <div class="thinking-chain-body open">${formatMessage(reasoning)}</div>
+                <div class="thinking-chain-body">${formatMessage(reasoning)}</div>
             </div>
         `;
     }
@@ -461,6 +336,7 @@ function formatMessage(text) {
         const codeId = 'code-' + (++codeBlockIdCounter);
         const langLabel = lang || 'code';
         const trimmedCode = code.trim();
+        // 对代码内容进行HTML转义（已在外部处理，这里需要反转义后重新处理）
         const escapedCode = trimmedCode
             .replace(/&amp;/g, '&')
             .replace(/&lt;/g, '<')
@@ -468,6 +344,7 @@ function formatMessage(text) {
             .replace(/&quot;/g, '"')
             .replace(/&#39;/g, "'");
         
+        // 重新转义用于安全展示
         const safeCode = escapedCode
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
@@ -542,16 +419,18 @@ function formatMessage(text) {
 
 /**
  * 流式渲染格式化 - 处理可能未闭合的代码块
+ * 在流式输出过程中，代码块可能只有开头的 ``` 而没有结尾的 ```
  */
 function formatMessageStreaming(text) {
     if (!text) return '';
     
+    // 转义HTML
     let html = text
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
     
-    // 已闭合的代码块
+    // 已闭合的代码块 (```...```) - 渲染为带操作按钮的组件
     html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (match, lang, code) => {
         const codeId = 'code-' + (++codeBlockIdCounter);
         const langLabel = lang || 'code';
@@ -595,7 +474,8 @@ function formatMessageStreaming(text) {
             </div>`;
     });
     
-    // 未闭合的代码块
+    // 未闭合的代码块 (```lang\ncode... 没有结尾的 ```)
+    // 将其渲染为临时代码块（流式输出中）
     html = html.replace(/```(\w*)\n([\s\S]*?)$/gm, (match, lang, code) => {
         const codeId = 'code-streaming-' + (++codeBlockIdCounter);
         const langLabel = lang || 'code';
@@ -618,20 +498,38 @@ function formatMessageStreaming(text) {
             </div>`;
     });
     
+    // 行内代码 (`...`)
     html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    
+    // 粗体 (**...**)
     html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    
+    // 斜体 (*...*)
     html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    
+    // 标题
     html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
     html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
     html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+    
+    // 无序列表
     html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
     html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+    
+    // 有序列表
     html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+    
+    // 引用
     html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+    
+    // 水平线
     html = html.replace(/^---$/gm, '<hr>');
+    
+    // 换行
     html = html.replace(/\n\n/g, '</p><p>');
     html = html.replace(/\n/g, '<br>');
     
+    // 包裹段落
     if (!html.startsWith('<')) {
         html = '<p>' + html + '</p>';
     }
@@ -641,6 +539,9 @@ function formatMessageStreaming(text) {
 
 // ========== 代码块操作 ==========
 
+/**
+ * 复制代码块内容到剪贴板
+ */
 function copyCodeBlock(codeId) {
     const wrapper = document.querySelector(`.code-block-wrapper[data-code-id="${codeId}"]`);
     if (!wrapper) return;
@@ -648,8 +549,10 @@ function copyCodeBlock(codeId) {
     const codeElement = wrapper.querySelector('code');
     if (!codeElement) return;
     
+    // 获取原始代码文本（反转义HTML实体）
     const rawCode = codeElement.textContent || codeElement.innerText || '';
     
+    // 使用 Clipboard API 复制
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(rawCode).then(() => {
             showCopySuccess(wrapper);
@@ -661,6 +564,9 @@ function copyCodeBlock(codeId) {
     }
 }
 
+/**
+ * 降级复制方案（兼容旧浏览器）
+ */
 function fallbackCopy(text, wrapper) {
     const textarea = document.createElement('textarea');
     textarea.value = text;
@@ -681,21 +587,27 @@ function fallbackCopy(text, wrapper) {
     document.body.removeChild(textarea);
 }
 
+/**
+ * 显示复制成功提示
+ */
 function showCopySuccess(wrapper) {
     const copyBtn = wrapper.querySelector('.copy-btn');
     if (!copyBtn) return;
     
+    // 更新按钮状态
     copyBtn.classList.add('copied');
     const spanEl = copyBtn.querySelector('span');
     const originalText = spanEl ? spanEl.textContent : '复制';
     
     if (spanEl) spanEl.textContent = '已复制';
     
+    // 更新SVG为勾号
     const svgEl = copyBtn.querySelector('svg');
     if (svgEl) {
         svgEl.innerHTML = '<polyline points="20 6 9 17 4 12"></polyline>';
     }
     
+    // 2秒后恢复
     setTimeout(() => {
         copyBtn.classList.remove('copied');
         if (spanEl) spanEl.textContent = originalText;
@@ -708,6 +620,9 @@ function showCopySuccess(wrapper) {
     }, 2000);
 }
 
+/**
+ * 下载代码块内容为本地文件
+ */
 function downloadCodeBlock(codeId) {
     const wrapper = document.querySelector(`.code-block-wrapper[data-code-id="${codeId}"]`);
     if (!wrapper) return;
@@ -715,11 +630,14 @@ function downloadCodeBlock(codeId) {
     const codeElement = wrapper.querySelector('code');
     if (!codeElement) return;
     
+    // 获取原始代码文本
     const rawCode = codeElement.textContent || codeElement.innerText || '';
     
+    // 获取语言标签，用于确定文件扩展名
     const langLabel = wrapper.querySelector('.code-lang-label');
     const lang = langLabel ? langLabel.textContent.trim().toLowerCase() : '';
     
+    // 语言到扩展名的映射
     const extMap = {
         'python': '.py', 'py': '.py',
         'javascript': '.js', 'js': '.js',
@@ -747,6 +665,7 @@ function downloadCodeBlock(codeId) {
     const ext = extMap[lang] || '.txt';
     const filename = `code${ext}`;
     
+    // 创建 Blob 并触发下载
     const blob = new Blob([rawCode], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -757,6 +676,7 @@ function downloadCodeBlock(codeId) {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     
+    // 下载按钮短暂反馈
     const downloadBtn = wrapper.querySelector('.download-btn');
     if (downloadBtn) {
         const spanEl = downloadBtn.querySelector('span');
@@ -775,6 +695,7 @@ async function sendMessage() {
     const content = elements.messageInput.value.trim();
     if (!content || state.isStreaming) return;
     
+    // 如果没有当前对话，创建新对话
     if (!state.currentConversationId) {
         createNewChat();
     }
@@ -782,27 +703,33 @@ async function sendMessage() {
     const conv = getCurrentConversation();
     if (!conv) return;
     
+    // 更新对话标题
     if (conv.messages.length === 0) {
         conv.title = content.length > 20 ? content.substring(0, 20) + '...' : content;
     }
     
+    // 添加用户消息
     const userMessage = { role: 'user', content };
     conv.messages.push(userMessage);
     addMessageToUI('user', content);
     
+    // 清空输入框
     elements.messageInput.value = '';
     autoResizeInput();
     
+    // 禁用发送按钮
     state.isStreaming = true;
     elements.sendBtn.disabled = true;
     elements.thinkingIndicator.style.display = 'flex';
     elements.thinkingText.textContent = state.enableSearch ? '正在搜索并思考...' : 'AI 正在思考...';
     
+    // 准备发送给API的消息
     const apiMessages = conv.messages.map(m => ({
         role: m.role,
         content: m.content
     }));
     
+    // 创建AI消息占位
     const aiMessageDiv = addMessageToUI('assistant', '');
     const aiTextDiv = aiMessageDiv.querySelector('.message-text');
     const aiContentDiv = aiMessageDiv.querySelector('.message-content');
@@ -812,15 +739,24 @@ async function sendMessage() {
     let thinkingBodyDiv = null;
     let searchStatusDiv = null;
     
+    // iOS Safari 兼容：使用 AbortController 设置超时
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => {
+        abortController.abort();
+    }, 120000); // 2分钟超时（iOS Safari 默认超时较短）
+    
     try {
-        const response = await fetch(apiUrl('/api/chat'), {
+        const response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 messages: apiMessages,
                 enable_search: state.enableSearch 
-            })
+            }),
+            signal: abortController.signal,
         });
+        
+        clearTimeout(timeoutId);
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
@@ -831,9 +767,21 @@ async function sendMessage() {
         
         elements.thinkingIndicator.style.display = 'none';
         
+        // iOS 心跳检测：如果 30 秒没收到数据，认为连接断开
+        let lastDataTime = Date.now();
+        const heartbeatCheck = setInterval(() => {
+            if (Date.now() - lastDataTime > 35000) {
+                console.warn('SSE 心跳超时，可能连接已断开');
+                reader.cancel();
+                clearInterval(heartbeatCheck);
+            }
+        }, 5000);
+        
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
+            
+            lastDataTime = Date.now();
             
             const chunk = decoder.decode(value, { stream: true });
             const lines = chunk.split('\n');
@@ -847,11 +795,16 @@ async function sendMessage() {
                     try {
                         const parsed = JSON.parse(data);
                         
+                        // 心跳消息，忽略
+                        if (parsed.type === 'heartbeat') continue;
+                        
+                        // 处理错误
                         if (parsed.type === 'error') {
                             aiContent = `❌ 错误: ${parsed.content}`;
                             aiTextDiv.innerHTML = formatMessage(aiContent);
                         }
                         
+                        // 处理搜索状态
                         if (parsed.type === 'search_start') {
                             searchStatusDiv = document.createElement('div');
                             searchStatusDiv.className = 'search-status';
@@ -872,6 +825,7 @@ async function sendMessage() {
                             `;
                         }
                         
+                        // 处理思考链内容
                         if (parsed.type === 'reasoning') {
                             aiReasoning += parsed.content;
                             
@@ -898,6 +852,7 @@ async function sendMessage() {
                             scrollToBottom();
                         }
                         
+                        // 处理正式回答内容
                         if (parsed.type === 'content') {
                             aiContent += parsed.content;
                             aiTextDiv.innerHTML = formatMessageStreaming(aiContent);
@@ -911,8 +866,12 @@ async function sendMessage() {
             }
         }
         
+        clearInterval(heartbeatCheck);
+        
+        // 流式结束后，用完整格式化重新渲染
         aiTextDiv.innerHTML = formatMessage(aiContent);
         
+        // 保存AI消息
         const aiMessage = { role: 'assistant', content: aiContent };
         if (aiReasoning) {
             aiMessage.reasoning = aiReasoning;
@@ -922,8 +881,17 @@ async function sendMessage() {
         renderChatHistory();
         
     } catch (error) {
+        clearTimeout(timeoutId);
         elements.thinkingIndicator.style.display = 'none';
-        aiContent = `❌ 请求失败: ${error.message}`;
+        
+        // 区分超时和网络错误
+        if (error.name === 'AbortError') {
+            aiContent = '⏱️ 请求超时，请检查网络连接后重试';
+        } else if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+            aiContent = '🌐 网络连接失败，请检查网络后重试（iOS 用户请确保未开启"阻止跨站跟踪"）';
+        } else {
+            aiContent = `❌ 请求失败: ${error.message}`;
+        }
         aiTextDiv.innerHTML = formatMessage(aiContent);
         conv.messages.push({ role: 'assistant', content: aiContent });
         saveConversations();
@@ -948,22 +916,13 @@ function toggleSidebar() {
     } else {
         elements.sidebar.classList.remove('collapsed');
     }
-    
-    // 移动端遮罩层处理
-    const overlay = document.getElementById('sidebarOverlay');
-    if (overlay) {
-        if (!state.sidebarCollapsed) {
-            overlay.classList.add('visible');
-            document.body.classList.add('sidebar-open');
-        } else {
-            overlay.classList.remove('visible');
-            document.body.classList.remove('sidebar-open');
-        }
-    }
 }
 
 // ========== 消息管理：删除、编辑 ==========
 
+/**
+ * 确认删除消息 - 显示二次确认弹窗
+ */
 function confirmDeleteMessage(index) {
     if (state.isStreaming) return;
     
@@ -982,13 +941,18 @@ function confirmDeleteMessage(index) {
     );
 }
 
+/**
+ * 执行删除消息
+ */
 function deleteMessage(index) {
     const conv = getCurrentConversation();
     if (!conv) return;
     
+    // 删除消息
     conv.messages.splice(index, 1);
     saveConversations();
     
+    // 更新对话标题
     if (conv.messages.length === 0) {
         conv.title = '新对话';
     } else {
@@ -1004,12 +968,16 @@ function deleteMessage(index) {
     renderChatHistory();
     renderMessages();
     
+    // 如果消息全部删除，显示欢迎页
     if (conv.messages.length === 0) {
         elements.welcomeScreen.style.display = 'flex';
         elements.messagesList.innerHTML = '';
     }
 }
 
+/**
+ * 开始编辑消息
+ */
 function startEditMessage(index) {
     if (state.isStreaming) return;
     
@@ -1023,8 +991,13 @@ function startEditMessage(index) {
     const textDiv = messageEl.querySelector('.message-text');
     if (!textDiv) return;
     
+    // 保存原始内容用于取消
+    const originalContent = msg.content;
+    
+    // 获取纯文本内容（去除HTML标签）
     const plainText = msg.content;
     
+    // 替换为编辑区域
     textDiv.innerHTML = `
         <div class="edit-area">
             <textarea class="edit-textarea">${escapeHtml(plainText)}</textarea>
@@ -1035,10 +1008,12 @@ function startEditMessage(index) {
         </div>
     `;
     
+    // 聚焦并选中文本
     const textarea = textDiv.querySelector('.edit-textarea');
     textarea.focus();
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
     
+    // 自动调整高度
     textarea.style.height = 'auto';
     textarea.style.height = Math.min(textarea.scrollHeight, 300) + 'px';
     textarea.addEventListener('input', () => {
@@ -1046,6 +1021,7 @@ function startEditMessage(index) {
         textarea.style.height = Math.min(textarea.scrollHeight, 300) + 'px';
     });
     
+    // 支持 Ctrl+Enter 保存
     textarea.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
@@ -1058,6 +1034,9 @@ function startEditMessage(index) {
     });
 }
 
+/**
+ * 保存编辑后的消息
+ */
 function saveEditMessage(index, btnEl) {
     const conv = getCurrentConversation();
     if (!conv) return;
@@ -1070,6 +1049,7 @@ function saveEditMessage(index, btnEl) {
     
     const newContent = textarea.value.trim();
     if (!newContent) {
+        // 内容为空，提示用户
         textarea.style.borderColor = '#ff6b6b';
         textarea.focus();
         return;
@@ -1078,8 +1058,10 @@ function saveEditMessage(index, btnEl) {
     const oldContent = conv.messages[index].content;
     const contentChanged = (oldContent !== newContent);
     
+    // 更新消息内容
     conv.messages[index].content = newContent;
     
+    // 如果是用户消息且是第一条，更新对话标题
     if (conv.messages[index].role === 'user') {
         const firstUserMsg = conv.messages.find(m => m.role === 'user');
         if (firstUserMsg && firstUserMsg === conv.messages[index]) {
@@ -1089,17 +1071,22 @@ function saveEditMessage(index, btnEl) {
         }
     }
     
+    // 检测：如果编辑的消息后面还有消息，需要截断后续对话
     const msg = conv.messages[index];
     const hasMessagesAfter = (index + 1 < conv.messages.length);
     const hasAiReplyAfter = hasMessagesAfter && (conv.messages[index + 1].role === 'assistant');
     
     if (msg.role === 'user' && hasAiReplyAfter && contentChanged) {
+        // 用户消息被修改 + 后面有AI回复 → 截断并重新生成
         conv.messages = conv.messages.slice(0, index + 1);
         saveConversations();
         renderChatHistory();
         renderMessages();
+        
+        // 自动触发AI重新生成回答
         regenerateAiResponse(index);
     } else if (hasMessagesAfter && contentChanged) {
+        // 其他情况（如编辑AI消息后内容变了）→ 截断后续对话
         conv.messages = conv.messages.slice(0, index + 1);
         saveConversations();
         renderChatHistory();
@@ -1111,6 +1098,10 @@ function saveEditMessage(index, btnEl) {
     }
 }
 
+/**
+ * 基于编辑后的用户消息，重新生成AI回答
+ * 截断对话到指定位置，然后触发流式生成
+ */
 async function regenerateAiResponse(userMsgIndex) {
     if (state.isStreaming) return;
     
@@ -1122,11 +1113,13 @@ async function regenerateAiResponse(userMsgIndex) {
     elements.thinkingIndicator.style.display = 'flex';
     elements.thinkingText.textContent = state.enableSearch ? '正在搜索并重新生成...' : 'AI 正在重新生成...';
     
+    // 准备发送给API的消息（只包含到当前用户消息为止的上下文）
     const apiMessages = conv.messages.map(m => ({
         role: m.role,
         content: m.content
     }));
     
+    // 创建AI消息占位
     const aiMessageDiv = addMessageToUI('assistant', '');
     const aiTextDiv = aiMessageDiv.querySelector('.message-text');
     const aiContentDiv = aiMessageDiv.querySelector('.message-content');
@@ -1136,15 +1129,24 @@ async function regenerateAiResponse(userMsgIndex) {
     let thinkingBodyDiv = null;
     let searchStatusDiv = null;
     
+    // iOS Safari 兼容：使用 AbortController 设置超时
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => {
+        abortController.abort();
+    }, 120000);
+    
     try {
-        const response = await fetch(apiUrl('/api/chat'), {
+        const response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 messages: apiMessages,
                 enable_search: state.enableSearch 
-            })
+            }),
+            signal: abortController.signal,
         });
+        
+        clearTimeout(timeoutId);
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
@@ -1155,9 +1157,19 @@ async function regenerateAiResponse(userMsgIndex) {
         
         elements.thinkingIndicator.style.display = 'none';
         
+        let lastDataTime = Date.now();
+        const heartbeatCheck = setInterval(() => {
+            if (Date.now() - lastDataTime > 35000) {
+                reader.cancel();
+                clearInterval(heartbeatCheck);
+            }
+        }, 5000);
+        
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
+            
+            lastDataTime = Date.now();
             
             const chunk = decoder.decode(value, { stream: true });
             const lines = chunk.split('\n');
@@ -1170,6 +1182,8 @@ async function regenerateAiResponse(userMsgIndex) {
                     
                     try {
                         const parsed = JSON.parse(data);
+                        
+                        if (parsed.type === 'heartbeat') continue;
                         
                         if (parsed.type === 'error') {
                             aiContent = `❌ 错误: ${parsed.content}`;
@@ -1235,6 +1249,8 @@ async function regenerateAiResponse(userMsgIndex) {
             }
         }
         
+        clearInterval(heartbeatCheck);
+        
         aiTextDiv.innerHTML = formatMessage(aiContent);
         
         const aiMessage = { role: 'assistant', content: aiContent };
@@ -1246,8 +1262,16 @@ async function regenerateAiResponse(userMsgIndex) {
         renderChatHistory();
         
     } catch (error) {
+        clearTimeout(timeoutId);
         elements.thinkingIndicator.style.display = 'none';
-        aiContent = `❌ 请求失败: ${error.message}`;
+        
+        if (error.name === 'AbortError') {
+            aiContent = '⏱️ 请求超时，请检查网络连接后重试';
+        } else if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+            aiContent = '🌐 网络连接失败，请检查网络后重试（iOS 用户请确保未开启"阻止跨站跟踪"）';
+        } else {
+            aiContent = `❌ 请求失败: ${error.message}`;
+        }
         aiTextDiv.innerHTML = formatMessage(aiContent);
         conv.messages.push({ role: 'assistant', content: aiContent });
         saveConversations();
@@ -1258,11 +1282,19 @@ async function regenerateAiResponse(userMsgIndex) {
     elements.messageInput.focus();
 }
 
+/**
+ * 取消编辑消息
+ */
 function cancelEditMessage(index, btnEl) {
+    // 直接重新渲染恢复原内容
     renderMessages();
 }
 
+/**
+ * 显示确认对话框
+ */
 function showConfirmDialog(title, messageHtml, onConfirm) {
+    // 移除已有弹窗
     const existing = document.querySelector('.confirm-overlay');
     if (existing) existing.remove();
     
@@ -1285,25 +1317,30 @@ function showConfirmDialog(title, messageHtml, onConfirm) {
     
     document.body.appendChild(overlay);
     
+    // 动画入场
     requestAnimationFrame(() => {
         overlay.classList.add('visible');
     });
     
+    // 关闭函数
     const closeDialog = () => {
         overlay.classList.remove('visible');
         setTimeout(() => overlay.remove(), 200);
     };
     
+    // 绑定事件
     overlay.querySelector('.confirm-cancel-btn').addEventListener('click', closeDialog);
     overlay.querySelector('.confirm-ok-btn').addEventListener('click', () => {
         closeDialog();
         onConfirm();
     });
     
+    // 点击遮罩关闭
     overlay.addEventListener('click', (e) => {
         if (e.target === overlay) closeDialog();
     });
     
+    // ESC 关闭
     const escHandler = (e) => {
         if (e.key === 'Escape') {
             closeDialog();
@@ -1313,6 +1350,9 @@ function showConfirmDialog(title, messageHtml, onConfirm) {
     document.addEventListener('keydown', escHandler);
 }
 
+/**
+ * HTML转义工具函数
+ */
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
