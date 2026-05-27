@@ -25,13 +25,13 @@ const CRAWLER_CONFIG = {
   // 并发抓取网页数
   maxConcurrentFetches: 3,
   // 单页超时（毫秒）
-  pageTimeout: 6000,
+  pageTimeout: 8000,
   // 总抓取超时（毫秒）
-  totalTimeout: 10000,
+  totalTimeout: 12000,
   // 最大重试次数
-  maxRetries: 2,
+  maxRetries: 1,
   // 重试基础延迟（毫秒）
-  retryBaseDelay: 1000,
+  retryBaseDelay: 800,
   // 每个网页最大提取字符数
   maxContentPerPage: 2500,
   // 搜索上下文最大总长度
@@ -721,32 +721,41 @@ async function enrichWithCrawler(searchResults, query) {
 
   if (!urlsToFetch.length) return searchResults;
 
-  // 并行抓取（带随机延迟错开）
-  const fetchPromises = urlsToFetch.map(async (result, index) => {
-    // 拟人化：每个请求间隔 200-800ms 随机延迟
-    await sleep(randomInt(200, 800) * index);
+  console.log(`爬虫开始抓取 ${urlsToFetch.length} 个网页...`);
 
+  // 并行抓取（不延迟，直接并发）
+  const fetchPromises = urlsToFetch.map(async (result) => {
     try {
+      console.log(`爬虫抓取: ${result.url}`);
       const content = await fetchPageContentWithRetry(result.url);
       if (content) {
         const relevantContent = extractRelevantContent(content, query, CRAWLER_CONFIG.maxContentPerPage);
         if (relevantContent) {
           result.fullContent = relevantContent;
           result.hasCrawled = true;
+          console.log(`爬虫成功: ${result.url} (${relevantContent.length} 字符)`);
         }
+      } else {
+        console.log(`爬虫跳过: ${result.url} (无内容或被拦截)`);
       }
     } catch (err) {
-      console.error(`抓取 ${result.url} 失败:`, err.message);
+      console.error(`爬虫失败 ${result.url}: ${err.message}`);
     }
     return result;
   });
 
-  // 总超时保护
-  const timeout = new Promise((resolve) => {
-    setTimeout(() => resolve(null), CRAWLER_CONFIG.totalTimeout);
-  });
+  // 总超时保护 - 使用 AbortController 方式
+  try {
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('爬虫总超时')), CRAWLER_CONFIG.totalTimeout);
+    });
+    await Promise.race([Promise.all(fetchPromises), timeoutPromise]);
+  } catch (err) {
+    console.log(`爬虫超时或出错: ${err.message}`);
+  }
 
-  await Promise.race([Promise.all(fetchPromises), timeout]);
+  const crawledCount = searchResults.filter(r => r.hasCrawled).length;
+  console.log(`爬虫完成: ${crawledCount}/${urlsToFetch.length} 个网页成功抓取`);
 
   return searchResults;
 }
@@ -801,7 +810,10 @@ async function fetchPageContent(url) {
       return null;
     }
 
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      console.log(`HTTP错误: ${url} (${resp.status})`);
+      return null;
+    }
 
     // 检查是否被重定向到验证页面
     const finalUrl = resp.url;
@@ -869,10 +881,6 @@ function isBlockPage(html) {
  */
 function buildBrowserHeaders(referer = 'https://www.google.com/') {
   const ua = getRandomUA();
-  const isChrome = ua.includes('Chrome') && !ua.includes('Edg');
-  const isEdge = ua.includes('Edg');
-  const isSafari = ua.includes('Safari') && !ua.includes('Chrome');
-  const isFirefox = ua.includes('Firefox');
 
   const headers = {
     'User-Agent': ua,
@@ -883,37 +891,10 @@ function buildBrowserHeaders(referer = 'https://www.google.com/') {
     'Cache-Control': 'max-age=0',
     'Connection': 'keep-alive',
     'Upgrade-Insecure-Requests': '1',
-    'DNT': '1', // Do Not Track
   };
 
-  // Chrome/Edge 特有 Headers
-  if (isChrome || isEdge) {
-    headers['Sec-CH-UA'] = randomChoice(SEC_CH_UA_POOL);
-    headers['Sec-CH-UA-Mobile'] = '?0';
-    headers['Sec-CH-UA-Platform'] = randomChoice(['"Windows"', '"macOS"', '"Linux"']);
-    headers['Sec-Fetch-Site'] = randomChoice(['cross-site', 'none', 'same-origin']);
-    headers['Sec-Fetch-Mode'] = 'navigate';
-    headers['Sec-Fetch-User'] = '?1';
-    headers['Sec-Fetch-Dest'] = 'document';
-  }
-
-  // Safari 特有 Headers
-  if (isSafari) {
-    headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
-    delete headers['Upgrade-Insecure-Requests'];
-    delete headers['Sec-CH-UA'];
-    delete headers['Sec-CH-UA-Mobile'];
-    delete headers['Sec-CH-UA-Platform'];
-  }
-
-  // Firefox 特有 Headers
-  if (isFirefox) {
-    headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8';
-    headers['TE'] = 'trailers';
-    delete headers['Sec-CH-UA'];
-    delete headers['Sec-CH-UA-Mobile'];
-    delete headers['Sec-CH-UA-Platform'];
-  }
+  // 注意：Cloudflare Workers 中不允许设置 Sec- 前缀的 Headers
+  // 这些 Headers 会被 Workers 自动处理或拒绝
 
   return headers;
 }

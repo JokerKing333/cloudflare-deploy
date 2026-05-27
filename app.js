@@ -910,12 +910,50 @@ function autoResizeInput() {
 }
 
 function toggleSidebar() {
-    state.sidebarCollapsed = !state.sidebarCollapsed;
-    if (state.sidebarCollapsed) {
-        elements.sidebar.classList.add('collapsed');
+    const isMobile = window.innerWidth <= 768;
+    
+    if (isMobile) {
+        // 移动端：使用 mobile-open class 控制滑入/滑出
+        const isOpen = elements.sidebar.classList.contains('mobile-open');
+        if (isOpen) {
+            closeMobileSidebar();
+        } else {
+            openMobileSidebar();
+        }
     } else {
-        elements.sidebar.classList.remove('collapsed');
+        // 桌面端：使用 collapsed class
+        state.sidebarCollapsed = !state.sidebarCollapsed;
+        if (state.sidebarCollapsed) {
+            elements.sidebar.classList.add('collapsed');
+        } else {
+            elements.sidebar.classList.remove('collapsed');
+        }
     }
+}
+
+function openMobileSidebar() {
+    elements.sidebar.classList.add('mobile-open');
+    // 创建遮罩层
+    let overlay = document.querySelector('.sidebar-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'sidebar-overlay';
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', closeMobileSidebar);
+    }
+    overlay.classList.add('visible');
+    // 阻止背景滚动
+    document.body.style.overflow = 'hidden';
+}
+
+function closeMobileSidebar() {
+    elements.sidebar.classList.remove('mobile-open');
+    const overlay = document.querySelector('.sidebar-overlay');
+    if (overlay) {
+        overlay.classList.remove('visible');
+    }
+    // 恢复滚动
+    document.body.style.overflow = '';
 }
 
 // ========== 消息管理：删除、编辑 ==========
