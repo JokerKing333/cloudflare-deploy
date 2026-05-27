@@ -85,6 +85,7 @@ body {
 .sidebar-header {
     padding: 16px;
     border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
 }
 
 .new-chat-btn {
@@ -119,6 +120,7 @@ body {
 
 .chat-history {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 8px;
     -webkit-overflow-scrolling: touch;
@@ -183,6 +185,7 @@ body {
 .sidebar-footer {
     padding: 16px;
     border-top: 1px solid var(--border);
+    flex-shrink: 0;
 }
 
 .user-info {
@@ -1205,10 +1208,13 @@ body {
         bottom: 0;
         width: 280px;
         min-width: 280px;
+        max-height: 100vh;
+        max-height: 100dvh;
         transform: translateX(-100%);
         box-shadow: 4px 0 20px rgba(0, 0, 0, 0.5);
         z-index: 200;
         padding-top: var(--safe-area-top);
+        padding-bottom: var(--safe-area-bottom);
     }
 
     .sidebar:not(.collapsed) {
@@ -1439,8 +1445,9 @@ body {
 /* 小屏手机 (≤480px) */
 @media (max-width: 480px) {
     .sidebar {
-        width: 100vw;
-        min-width: 100vw;
+        width: 85vw;
+        min-width: 85vw;
+        max-width: 320px;
     }
 
     .top-bar {
